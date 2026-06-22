@@ -26,6 +26,7 @@ export interface RouterConfig {
   circuitBreakerThreshold: number
   logLevel: string
   configDir: string
+  strategy: RoutingStrategy
 }
 
 export const DEFAULT_CONFIG: RouterConfig = {
@@ -37,6 +38,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   circuitBreakerThreshold: 3,
   logLevel: 'info',
   configDir: '',
+  strategy: RoutingStrategy.EXHAUSTION_FAILOVER,
 }
 
 export enum CircuitState {

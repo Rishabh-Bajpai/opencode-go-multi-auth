@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenCode Go Router</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-left">
+        <h1>OpenCode Go Router</h1>
+        <span class="status-badge" id="status-badge">Disconnected</span>
+      </div>
+      <div class="header-right">
+        <span class="version">v0.1.0</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card" id="key-management">
+        <div class="card-header">
+          <h2>Key Management</h2>
+          <button class="btn btn-primary" id="add-key-btn">+ Add Key</button>
+        </div>
+        <div class="card-body" id="key-list"></div>
+      </section>
+
+      <section class="card" id="strategy-section">
+        <div class="card-header">
+          <h2>Routing Strategy</h2>
+        </div>
+        <div class="card-body">
+          <select class="select" id="strategy-select">
+            <option value="exhaustion_failover">Exhaustion Failover</option>
+            <option value="round_robin">Round-Robin</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card" id="status-section">
+        <div class="card-header">
+          <h2>Status Ledger</h2>
+        </div>
+        <div class="card-body" id="status-ledger"></div>
+      </section>
+
+      <section class="card" id="logs-section">
+        <div class="card-header">
+          <h2>Log Viewer</h2>
+          <button class="btn btn-secondary" id="clear-logs-btn">Clear</button>
+        </div>
+        <div class="card-body" id="log-viewer"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="add-key-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Add API Key</h3>
+        <button class="btn-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" class="input" id="key-alias-input" placeholder="Alias (e.g. Primary)">
+        <input type="password" class="input" id="key-value-input" placeholder="Paste your OpenCode Go API key">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-save">Add Key</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
