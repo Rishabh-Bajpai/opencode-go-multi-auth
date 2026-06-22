@@ -32,3 +32,30 @@
 ### Next steps
 - Await user approval of the implementation plan.
 - Once approved, begin Phase 1: project scaffolding with initial git commit.
+
+---
+
+## 2026-06-22 — Session 2: Full Build
+
+### What was done
+1. **Presented plan and got user approval** — user confirmed all decisions (encrypted file storage, ports 18904/18905, configurable quota, CLI + library, upstream URL).
+2. **Phase 1: Project scaffolding** — package.json, tsconfig, .gitignore, .env.example, directory structure, router types.
+3. **Phase 2: Core Router Engine** — KeyManager (pool mgmt, exhaustion failover, round-robin), CircuitBreaker (3-consecutive-5xx threshold, auto-recovery), QuotaTracker (token usage tracking, 95% proactive switch).
+4. **Phase 3: Proxy Server** — HTTP proxy on port 18905, cache header passthrough utility, key attachment, failover/retry logic.
+5. **Phase 4: Plugin Adapter** — OpenCode provider config generator + setup instructions (noted Plugin types not exported by public SDK).
+6. **Phase 5: Secure Key Storage** — PBKDF2 + AES-256-GCM encrypted file at `~/.opencode/router-keys.enc`.
+7. **Phase 6: Logging** — Winston file logger (5MB rotation) + WebSocket real-time log streaming with 500-entry ring buffer.
+8. **Phase 7: Web UI Dashboard** — Express server on port 18904, REST API (keys, strategy, status, logs), dark glassmorphism SPA with real-time logs.
+9. **Phase 8: Entry Point & CLI** — `createRouter()` wire-up, `opencode-go-router` bin script, library exports.
+
+### Verification
+- `npm run build` — clean compilation with 0 errors
+- `npm start` — app boots, both servers listen, setup guide prints
+- Smoke test: graceful shutdown on SIGINT
+- **Security audit**: scanned all 7 commits — no API keys, passwords, or secrets leaked. Only type names, method names, and placeholder strings present.
+- Ports 18904/18905 confirmed free
+
+### Deliverables
+- 23 source files across 8 modules
+- 7 git commits after initial commit
+- Full README with installation and usage instructions
