@@ -27,6 +27,7 @@ export interface RouterConfig {
   logLevel: string
   configDir: string
   strategy: RoutingStrategy
+  ntfyUrl: string
 }
 
 export const DEFAULT_CONFIG: RouterConfig = {
@@ -39,6 +40,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   logLevel: 'info',
   configDir: '',
   strategy: RoutingStrategy.EXHAUSTION_FAILOVER,
+  ntfyUrl: '',
 }
 
 export enum CircuitState {

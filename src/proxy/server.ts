@@ -4,6 +4,7 @@ import type { CircuitBreaker } from '../router/circuit-breaker.js'
 import type { QuotaTracker } from '../router/quota-tracker.js'
 import { LogStream } from '../logging/log-stream.js'
 import type { AppLogger } from '../logging/logger.js'
+import { NtfyNotifier } from '../notification/ntfy.js'
 import { RoutingStrategy, CircuitState } from '../router/types.js'
 import { buildUpstreamHeaders, extractCacheHeaders } from './header-passthrough.js'
 import { isQuota429 } from './quota-detector.js'
@@ -33,6 +34,7 @@ export class ProxyServer {
     private quotaTracker: QuotaTracker,
     private logStream: LogStream,
     private logger: AppLogger,
+    private notifier: NtfyNotifier = new NtfyNotifier(),
   ) {
     this.config = config
     this.sessionAffinity = new SessionAffinityStore()
@@ -58,7 +60,8 @@ export class ProxyServer {
     const cacheHeaders = extractCacheHeaders(req.headers as Record<string, string | string[] | undefined>)
     const sessionKey = this.sessionAffinity.extractSessionKey(req.headers as Record<string, string | string[] | undefined>)
 
-    const maxAttempts = this.keyManager.getActiveKeys().length || 1
+    const totalKeys = this.keyManager.getActiveKeys().length
+    const maxAttempts = totalKeys || 1
     let lastError = 'All API keys exhausted'
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -75,12 +78,22 @@ export class ProxyServer {
       }
 
       if (!key) {
+        const allExhausted = this.keyManager.getKeys().length > 0
+        if (allExhausted) {
+          await this.notifier.allKeysExhausted(this.keyManager.getKeys().length)
+        }
         res.writeHead(503, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: 'No active API keys available' }))
         return
       }
 
       if (!this.circuitBreaker.isAvailable(key.id)) continue
+
+      if (this.quotaTracker.shouldProactiveSwitch(key.id)) {
+        const usage = this.quotaTracker.getUsage(key.id)
+        await this.notifier.proactiveSwitch(key.alias, usage.percentUsed)
+        this.logStream.emit(this.logger, 'warn', `Proactive switch — key "${key.alias}" at ${(usage.percentUsed * 100).toFixed(0)}% quota`, { keyId: key.id })
+      }
 
       const upstreamHeaders = buildUpstreamHeaders(
         req.headers as Record<string, string | string[] | undefined>,
@@ -106,11 +119,17 @@ export class ProxyServer {
           const responseBody = await upstreamRes.clone().text()
           const isQuota = isQuota429(upstreamRes.status, Object.fromEntries(upstreamRes.headers), responseBody)
           if (isQuota) {
+            const remainingKeys = this.keyManager.getActiveKeys().filter(k => k.id !== key.id).length
             this.keyManager.markExhausted(key.id)
+            await this.notifier.keyExhausted(key.alias, upstreamRes.status, remainingKeys)
             this.logStream.emit(this.logger, 'warn', `Key "${key.alias}" quota exhausted (HTTP ${upstreamRes.status}), failing over`, {
               keyId: key.id, statusCode: upstreamRes.status, attempt: attempt + 1,
             })
             if (sessionKey) this.sessionAffinity.setPreferredKey(sessionKey, key.id)
+
+            if (remainingKeys === 0) {
+              await this.notifier.allKeysExhausted(this.keyManager.getKeys().length)
+            }
             continue
           }
         }
@@ -119,10 +138,13 @@ export class ProxyServer {
           this.circuitBreaker.recordFailure(key.id)
           this.circuitBreaker.tryRecovery(key.id)
           if (this.circuitBreaker.getState(key.id) === CircuitState.OPEN) {
+            await this.notifier.circuitTripped(key.alias, key.consecutiveErrors)
             this.logStream.emit(this.logger, 'error', `Circuit breaker OPEN for key "${key.alias}"`, { keyId: key.id })
           }
           if (attempt < maxAttempts - 1) continue
         }
+
+        this.circuitBreaker.recordSuccess(key.id)
 
         const responseBody = await upstreamRes.clone().text()
         const tokens = parseTokenUsage(responseBody)
@@ -132,7 +154,6 @@ export class ProxyServer {
         }
 
         if (sessionKey) this.sessionAffinity.setPreferredKey(sessionKey, key.id)
-        this.circuitBreaker.recordSuccess(key.id)
 
         this.logStream.emit(this.logger, 'info', `${req.method} ${targetPath} -> ${upstreamRes.status} via "${key.alias}" (${duration}ms)`)
 

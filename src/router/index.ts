@@ -7,6 +7,7 @@ import { LogStream } from '../logging/log-stream.js'
 import { createLogger } from '../logging/logger.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
+import { NtfyNotifier } from '../notification/ntfy.js'
 import { printSetupInstructions } from '../plugin/index.js'
 import type { RouterConfig } from './types.js'
 import { DEFAULT_CONFIG } from './types.js'
@@ -20,6 +21,7 @@ export interface RouterInstance {
   logStream: LogStream
   configStore: ConfigStore
   secureStore: SecureStore
+  notifier: NtfyNotifier
   shutdown: () => Promise<void>
 }
 
@@ -33,6 +35,7 @@ function loadEnvConfig(): Partial<RouterConfig> {
     circuitBreakerThreshold: Number(process.env.CIRCUIT_BREAKER_THRESHOLD) || DEFAULT_CONFIG.circuitBreakerThreshold,
     logLevel: process.env.LOG_LEVEL || DEFAULT_CONFIG.logLevel,
     configDir: process.env.CONFIG_DIR || DEFAULT_CONFIG.configDir,
+    ntfyUrl: process.env.NTFY_URL || DEFAULT_CONFIG.ntfyUrl,
   }
 }
 
@@ -54,6 +57,12 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
     keyManager.addKey(key, alias)
   }
 
+  const notifier = new NtfyNotifier(mergedConfig.ntfyUrl)
+
+  if (notifier.enabled) {
+    console.log(`[NTFY] Notifications enabled → ${mergedConfig.ntfyUrl}`)
+  }
+
   const proxyServer = new ProxyServer(
     { port: mergedConfig.proxyPort, upstreamUrl: mergedConfig.upstreamUrl },
     keyManager,
@@ -61,6 +70,7 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
     quotaTracker,
     logStream,
     logger,
+    notifier,
   )
 
   const dashboardServer = new DashboardServer(
@@ -93,6 +103,7 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
     logStream,
     configStore,
     secureStore,
+    notifier,
     shutdown: async () => {
       logStream.emit(logger, 'info', 'Shutting down...')
       await proxyServer.stop()
