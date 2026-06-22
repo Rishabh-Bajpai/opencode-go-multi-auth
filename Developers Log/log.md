@@ -59,3 +59,43 @@
 - 23 source files across 8 modules
 - 7 git commits after initial commit
 - Full README with installation and usage instructions
+
+---
+
+## 2026-06-22 — Session 3: Proxy Refactor (post-reference-repo analysis)
+
+### What was done
+1. **Cloned and analyzed all 3 reference repos** from PRD:
+   - **codex-multi-auth**: Adopted session affinity pattern (`X-Session-Id` → account mapping)
+   - **switchboard-go**: Adopted `isQuota429()` body parsing + body buffering for retries
+   - **tokscale**: Adopted 5-bucket token breakdown for quota tracking
+
+2. **Replaced `http-proxy` with custom fetch handler** — full control over request/response lifecycle:
+   - Body buffering into memory before first upstream call (enables retry replay)
+   - Explicit `fetch()` to upstream with per-key `Authorization: Bearer`
+   - Response body parsing for token usage extraction
+   - Retry loop with different keys on quota exhaustion
+   - Streaming response back to client on success
+
+3. **Added `src/proxy/quota-detector.ts`** — `isQuota429()` distinguishes real quota exhaustion from transient rate limits by parsing JSON body fields (`insufficient_quota`, `credit balance`, `exhausted`, etc.) and `X-RateLimit-Reason` header
+
+4. **Added `src/proxy/response-parser.ts`** — Token usage extraction from OpenAI and Anthropic response formats. `estimateCost()` with configurable pricing rates.
+
+5. **Added `src/proxy/session-affinity.ts`** — Maps `X-Session-Id` → account for cache consistency. 20-min TTL, 512-entry cap.
+
+6. **Rewrote `src/proxy/header-passthrough.ts`** — Clean header forwarding with hop-by-hop stripping, cache header preservation.
+
+7. **Updated `src/router/quota-tracker.ts`** — Accepts real `TokenBreakdown` data (input, output, cacheRead, cacheWrite, reasoning) instead of generic counters.
+
+### Files changed
+- `src/proxy/server.ts` — Complete rewrite (removed http-proxy dependency)
+- `src/proxy/header-passthrough.ts` — Rewritten
+- `src/router/quota-tracker.ts` — Updated for TokenBreakdown
+- `src/router/index.ts` — Updated wiring
+- `package.json` — Removed http-proxy dependency
+- New: `quota-detector.ts`, `response-parser.ts`, `session-affinity.ts`
+
+### Verification
+- `npm run build` — clean compilation
+- Full integration test: dashboard serves HTML, API CRUD works, proxy forwards to upstream (confirmed via opencode.ai 404 response), logs stream, status shows per-key quota
+- Removed unused `http-proxy` dependency

@@ -1,4 +1,3 @@
-import http from 'node:http'
 import { KeyManager } from './key-manager.js'
 import { CircuitBreaker } from './circuit-breaker.js'
 import { QuotaTracker } from './quota-tracker.js'
@@ -21,7 +20,6 @@ export interface RouterInstance {
   logStream: LogStream
   configStore: ConfigStore
   secureStore: SecureStore
-  httpServer?: http.Server
   shutdown: () => Promise<void>
 }
 
@@ -61,6 +59,8 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
     keyManager,
     circuitBreaker,
     quotaTracker,
+    logStream,
+    logger,
   )
 
   const dashboardServer = new DashboardServer(
@@ -93,7 +93,6 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
     logStream,
     configStore,
     secureStore,
-    httpServer,
     shutdown: async () => {
       logStream.emit(logger, 'info', 'Shutting down...')
       await proxyServer.stop()
