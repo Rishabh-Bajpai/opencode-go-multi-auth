@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "dev": "tsx watch src/bin.ts",
-    "build": "tsc && cp -r src/dashboard/public dist/dashboard/public",
+    "build": "tsc && cp -r src/dashboard/public/. dist/dashboard/public/",
     "start": "node dist/bin.js",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
