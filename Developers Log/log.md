@@ -99,3 +99,27 @@
 - `npm run build` — clean compilation
 - Full integration test: dashboard serves HTML, API CRUD works, proxy forwards to upstream (confirmed via opencode.ai 404 response), logs stream, status shows per-key quota
 - Removed unused `http-proxy` dependency
+
+---
+
+## 2026-06-22 — Session 4: Optional ntfy Push Notifications
+
+### What was done
+1. **Created `src/notification/ntfy.ts`** — `NtfyNotifier` class that POSTs to any ntfy-compatible URL
+   - Methods: `keyExhausted()`, `allKeysExhausted()`, `circuitTripped()`, `circuitRecovered()`, `proactiveSwitch()`
+   - Priority levels: low (circuit recovered), high (key exhausted with backups), urgent (all keys exhausted)
+   - Tags: `information_source`, `rotating_light`, `warning` for mobile notification styling
+   - Fully fire-and-forget: failures are logged locally, never block the request
+
+2. **Wired into proxy** — Notifications fire automatically:
+   - **Key quota exhausted** (402/429 with quota body) → `keyExhausted()` with remaining key count
+   - **All keys exhausted** → `allKeysExhausted()` (sent once at the 503 response)
+   - **Circuit breaker OPEN** (3 consecutive 5xx) → `circuitTripped()` with error count
+   - **Proactive quota switch** (95% usage) → `proactiveSwitch()` with usage percentage
+
+3. **Config** — `NTFY_URL` env var, added to `.env.example`. Optional: if unset, notifier is a no-op.
+
+### Verification
+- `npm run build` — clean compilation
+- `NtfyNotifier.send()` test → successfully pushed to `https://ntfy.homelabrb.duckdns.org/Chanakya`
+- App startup with `NTFY_URL` set → shows `[NTFY] Notifications enabled → <url>`

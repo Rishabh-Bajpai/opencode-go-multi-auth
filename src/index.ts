@@ -8,6 +8,7 @@ export { ConfigStore } from './storage/config-store.js'
 export { DashboardServer } from './dashboard/server.js'
 export { LogStream } from './logging/log-stream.js'
 export { createLogger } from './logging/logger.js'
+export { NtfyNotifier } from './notification/ntfy.js'
 export { printSetupInstructions } from './plugin/index.js'
 
 export type { RouterConfig, ApiKey, RoutingStrategy } from './router/types.js'

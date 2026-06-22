@@ -123,6 +123,7 @@ Copy `.env.example` to `.env` and adjust as needed:
 | `CIRCUIT_BREAKER_THRESHOLD` | `3` | Consecutive 5xx errors before tripping |
 | `LOG_LEVEL` | `info` | Log level: `error`, `warn`, `info`, `debug` |
 | `CONFIG_DIR` | `~/.opencode` | Directory for config and encrypted key storage |
+| `NTFY_URL` | — | Optional ntfy URL for push notifications (e.g., `https://ntfy.sh/mytopic`). Leave empty to disable. |
 
 ### Ports
 
@@ -161,6 +162,32 @@ Both are configurable via environment variables.
 6. Token usage is parsed from responses and tracked against quota
 7. Caching headers (`X-Session-Id`, etc.) pass through unmodified
 8. All decisions are logged locally and streamed to the dashboard
+
+## Push Notifications
+
+Optional push notifications via [ntfy](https://ntfy.sh/) are sent when critical events happen.
+
+Set the `NTFY_URL` environment variable to enable:
+
+```bash
+export NTFY_URL=https://ntfy.sh/mytopic
+npm start
+```
+
+Or use your own ntfy instance:
+
+```bash
+export NTFY_URL=https://ntfy.yourdomain.com/Chanakya
+```
+
+| Event | Priority | Trigger |
+|---|---|---|
+| Key quota exhausted | High / Urgent | A key returns 402/429 with quota body, failover activates |
+| All keys exhausted | Urgent | Every key in the pool is exhausted |
+| Circuit breaker tripped | High | 3 consecutive 5xx errors, key removed from pool |
+| Proactive quota switch | Low | Key usage crosses 95% threshold, preemptive switch |
+
+Notifications are fire-and-forget — failures never block or slow down requests.
 
 ## Security
 
