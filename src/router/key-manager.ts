@@ -74,11 +74,11 @@ export class KeyManager {
     }
   }
 
-  markExhausted(id: string): void {
+  markExhausted(id: string, cooldownMs?: number): void {
     const key = this.getKeyById(id)
     if (!key) return
     key.status = 'cooldown'
-    key.cooldownUntil = Date.now() + this.cooldownMs
+    key.cooldownUntil = Date.now() + (cooldownMs ?? this.cooldownMs)
   }
 
   markError(id: string): void {

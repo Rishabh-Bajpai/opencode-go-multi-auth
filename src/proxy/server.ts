@@ -7,7 +7,7 @@ import type { AppLogger } from '../logging/logger.js'
 import { NtfyNotifier } from '../notification/ntfy.js'
 import { RoutingStrategy, CircuitState } from '../router/types.js'
 import { buildUpstreamHeaders, extractCacheHeaders } from './header-passthrough.js'
-import { isQuota429 } from './quota-detector.js'
+import { isQuota429, resolveCooldownMs } from './quota-detector.js'
 import { parseTokenUsage, estimateCost } from './response-parser.js'
 import { SessionAffinityStore } from './session-affinity.js'
 
@@ -120,10 +120,16 @@ export class ProxyServer {
           const isQuota = isQuota429(upstreamRes.status, Object.fromEntries(upstreamRes.headers), responseBody)
           if (isQuota) {
             const remainingKeys = this.keyManager.getActiveKeys().filter(k => k.id !== key.id).length
-            this.keyManager.markExhausted(key.id)
+            const now = Date.now()
+            const fallbackMs = 5 * 60 * 60 * 1000
+            const headerCooldownMs = resolveCooldownMs(Object.fromEntries(upstreamRes.headers), responseBody, now, fallbackMs)
+            const rollingCooldownMs = this.quotaTracker.getEstimatedCooldown(key.id, now)
+            const cooldownMs = rollingCooldownMs !== null ? Math.max(headerCooldownMs, rollingCooldownMs) : headerCooldownMs
+            this.keyManager.markExhausted(key.id, cooldownMs)
+            const cooldownHours = (cooldownMs / 3_600_000).toFixed(1)
             await this.notifier.keyExhausted(key.alias, upstreamRes.status, remainingKeys)
-            this.logStream.emit(this.logger, 'warn', `Key "${key.alias}" quota exhausted (HTTP ${upstreamRes.status}), failing over`, {
-              keyId: key.id, statusCode: upstreamRes.status, attempt: attempt + 1,
+            this.logStream.emit(this.logger, 'warn', `Key "${key.alias}" quota exhausted (HTTP ${upstreamRes.status}), cooldown ${cooldownHours}h, failing over`, {
+              keyId: key.id, statusCode: upstreamRes.status, cooldownMs, attempt: attempt + 1,
             })
             if (sessionKey) this.sessionAffinity.setPreferredKey(sessionKey, key.id)
 
