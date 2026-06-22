@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { createRouter } from './index.js'
+import { createRouter } from './router/index.js'
 
 async function main() {
   const router = await createRouter()
@@ -13,6 +13,16 @@ async function main() {
   process.on('SIGTERM', async () => {
     await router.shutdown()
     process.exit(0)
+  })
+
+  process.on('uncaughtException', async (err) => {
+    console.error('Uncaught exception:', err)
+    await router.shutdown()
+    process.exit(1)
+  })
+
+  process.on('unhandledRejection', async (reason) => {
+    console.error('Unhandled rejection:', reason)
   })
 }
 
