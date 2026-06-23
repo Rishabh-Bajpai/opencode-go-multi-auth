@@ -25,6 +25,8 @@ export interface ProxyServerConfig {
   requestTimeoutMs: number
   upstreamHungTimeoutMs: number
   fallbackCooldownMs: number
+  keepAliveTimeoutMs: number
+  headersTimeoutMs: number
 }
 
 interface RequestPreparation {
@@ -93,6 +95,11 @@ export class ProxyServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => this.handleRequest(req, res))
+      this.server.keepAliveTimeout = this.config.keepAliveTimeoutMs
+      this.server.headersTimeout = this.config.headersTimeoutMs
+      this.server.requestTimeout = this.config.requestTimeoutMs > 0
+        ? this.config.requestTimeoutMs
+        : 0
       this.server.on('error', (err) => reject(err))
       this.server.listen(this.config.port, () => resolve())
     })
@@ -143,6 +150,9 @@ export class ProxyServer {
     }
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (upstreamAbortController.signal.aborted) {
+        return
+      }
       const decision = this.selectKey(sessionKey, attemptedKeyIds)
 
       if (!decision) {
@@ -472,17 +482,35 @@ export class ProxyServer {
     return new Promise((resolve) => {
       const chunks: Buffer[] = []
       let total = 0
-      req.on('data', (chunk: Buffer) => {
+      let settled = false
+      const finish = (value: Buffer | null) => {
+        if (settled) return
+        settled = true
+        req.removeListener('data', onData)
+        req.removeListener('end', onEnd)
+        req.removeListener('error', onError)
+        req.removeListener('aborted', onAborted)
+        req.removeListener('close', onClose)
+        resolve(value)
+      }
+      const onData = (chunk: Buffer) => {
         total += chunk.length
         if (total > MAX_BODY_BYTES) {
           req.destroy()
-          resolve(null)
+          finish(null)
           return
         }
         chunks.push(chunk)
-      })
-      req.on('end', () => resolve(Buffer.concat(chunks)))
-      req.on('error', () => resolve(null))
+      }
+      const onEnd = () => finish(Buffer.concat(chunks))
+      const onError = () => finish(null)
+      const onAborted = () => finish(null)
+      const onClose = () => finish(total > 0 ? Buffer.concat(chunks) : null)
+      req.on('data', onData)
+      req.on('end', onEnd)
+      req.on('error', onError)
+      req.on('aborted', onAborted)
+      req.on('close', onClose)
     })
   }
 

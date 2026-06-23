@@ -82,6 +82,8 @@ export interface RouterConfig {
   ntfyUrl: string
   requestTimeoutMs: number
   upstreamHungTimeoutMs: number
+  keepAliveTimeoutMs: number
+  headersTimeoutMs: number
 }
 
 export const ROUTING_STRATEGIES: RoutingStrategyInfo[] = [
@@ -148,6 +150,8 @@ export const DEFAULT_CONFIG: RouterConfig = {
   ntfyUrl: '',
   requestTimeoutMs: 0,
   upstreamHungTimeoutMs: 0,
+  keepAliveTimeoutMs: 5 * 60 * 1000,
+  headersTimeoutMs: 60 * 1000,
 }
 
 export enum CircuitState {
