@@ -5,3 +5,4 @@ dist/
 *.enc
 .DS_Store
 repos/
+.playwright-mcp/*.yml
