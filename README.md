@@ -10,7 +10,7 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 - **Stream-Aware Usage Tracking** — Parses token usage from both full JSON and SSE streaming completions. Injects `stream_options.include_usage` for OpenAI-compatible streams.
 - **Proactive Quota Tracking** — Spills traffic at a configurable threshold before hitting hard limits.
 - **Circuit Breaker** — Temporarily removes unhealthy keys after 3 consecutive 5xx errors, auto-recovers after 5 minutes.
-- **Cache-Preserving Header Passthrough** — Forwards `X-Session-Id`, `prompt_cache_key` / `prompt-cache-key`, `cache_control` / `cache-control` for OpenCode's context caching discounts.
+- **Cache-Preserving Header Passthrough** — Forwards `X-Session-Id`, `prompt_cache_key` / `prompt-cache-key`, `cache_control` / `cache-control`, plus both bearer and `x-api-key` auth for broader model compatibility.
 - **Local Web UI Control Room** — Strategy explainer, key deck with inline editing, live usage ledger, routing tape with per-request route reasons and session IDs.
 - **Secure Key Storage** — AES-256-GCM encrypted at rest using PBKDF2-derived key from machine identity.
 - **Push Notifications** — Optional ntfy notifications for exhaustion, circuit breaker trips, and proactive switches.
@@ -107,6 +107,11 @@ opencode-go-router
 ```
 
 In standalone mode you must start the router yourself after reboot. Plugin mode avoids manual startup when opening OpenCode, but it is not an OS boot service.
+
+## Compatibility Notes
+
+- Some OpenCode Go models use `/messages` with Anthropic-style auth. The proxy now forwards both `Authorization: Bearer ...` and `x-api-key` to maximize compatibility.
+- If a new model still fails, capture the exact model name and the `/messages` or `/chat/completions` path from the router log.
 
 ## Routing Strategies
 
@@ -226,7 +231,7 @@ npm start
 
 ## OS Boot Service
 
-If you want the router to start when the machine boots, run the standalone router under your OS service manager. Plugin mode alone only starts the router when OpenCode launches.
+If you want the router to start when the machine boots or when you log into your desktop session, run the standalone router under your OS service manager. Plugin mode alone only starts the router when OpenCode launches.
 
 ### Linux (`systemd`)
 
@@ -238,7 +243,16 @@ npm install
 npm run build
 ```
 
-2. Create `~/.config/systemd/user/opencode-go-router.service`:
+2. Find your absolute Node path. If you use `nvm`, this matters because `systemd` will not load your interactive shell profile:
+
+```bash
+which node
+```
+
+3. Create `~/.config/systemd/user/opencode-go-router.service` and replace both absolute paths below:
+
+- `WorkingDirectory` must be the repo root
+- `ExecStart` must use the full path to your `node` binary and the full path to `dist/bin.js`
 
 ```ini
 [Unit]
@@ -249,7 +263,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/absolute/path/to/opencode-go-multi-auth
-ExecStart=/usr/bin/node /absolute/path/to/opencode-go-multi-auth/dist/bin.js
+ExecStart=/absolute/path/to/node /absolute/path/to/opencode-go-multi-auth/dist/bin.js
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
@@ -258,18 +272,39 @@ Environment=NODE_ENV=production
 WantedBy=default.target
 ```
 
-3. Enable and start it:
+4. Enable and start it:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now opencode-go-router.service
 ```
 
-4. Point OpenCode at the same proxy config from the earlier README section. With this setup, OpenCode can reuse the already-running router after login.
+5. Verify it:
+
+```bash
+systemctl --user status opencode-go-router.service --no-pager
+curl http://127.0.0.1:18904/healthz
+curl http://127.0.0.1:18905/v1/models
+```
+
+6. If you rebuild or change the source later, rebuild and restart the service:
+
+```bash
+npm run build
+systemctl --user restart opencode-go-router.service
+```
+
+7. Point OpenCode at the same proxy config from the earlier README section. With this setup, OpenCode can reuse the already-running router after login or reboot.
+
+### Notes
+
+- This is a user service, so it starts when your user session starts.
+- If you want it to run before login, you would need system-level service configuration and user lingering, which is usually unnecessary for this app.
+- If `which node` prints an `nvm` path, use that exact path in `ExecStart`.
 
 ### macOS (`launchd`)
 
-Use the standalone router with a user `LaunchAgent` that runs `node /absolute/path/to/opencode-go-multi-auth/dist/bin.js` in the repo directory. The important part is the same: build first, then manage `dist/bin.js` as a long-running user service.
+Use the standalone router with a user `LaunchAgent` that runs `node /absolute/path/to/opencode-go-multi-auth/dist/bin.js` in the repo directory. The important part is the same: build first, use absolute paths, and manage `dist/bin.js` as a long-running user service.
 
 ## Development
 

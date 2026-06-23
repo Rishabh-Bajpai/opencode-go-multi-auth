@@ -39,6 +39,7 @@ export function buildUpstreamHeaders(
 ): Record<string, string> {
   const headers: Record<string, string> = {
     'authorization': `Bearer ${bearerToken}`,
+    'x-api-key': bearerToken,
     'host': host,
     'content-type': 'application/json',
   }
