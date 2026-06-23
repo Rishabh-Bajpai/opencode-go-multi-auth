@@ -29,10 +29,16 @@ cd "${REPO_DIR}"
 # Step 1: gather every PID that could be holding the ports.
 # ---------------------------------------------------------------------------
 PIDS_TO_KILL=()
+PORT_PIDS=""
 
 # PIDs from the PID file (if it exists and the process is alive).
 if [ -f "${PID_FILE}" ]; then
-    RECORDED_PID=$(jq -r .pid "${PID_FILE}" 2>/dev/null || true)
+    if command -v jq >/dev/null 2>&1; then
+        RECORDED_PID=$(jq -r .pid "${PID_FILE}" 2>/dev/null || true)
+    else
+        RECORDED_PID=$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "${PID_FILE}" | head -n1)
+    fi
+
     if [ -n "${RECORDED_PID}" ] && [ "${RECORDED_PID}" != "null" ] && [ "${RECORDED_PID}" != "0" ]; then
         if kill -0 "${RECORDED_PID}" 2>/dev/null; then
             PIDS_TO_KILL+=("${RECORDED_PID}")
@@ -51,7 +57,7 @@ if command -v ss >/dev/null 2>&1; then
         | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
 elif command -v lsof >/dev/null 2>&1; then
     PORT_PIDS=$( { lsof -nP -iTCP:${DASHBOARD_PORT} -sTCP:LISTEN -t 2>/dev/null; \
-                   lsof -nP -iTCP:${PROXY_PORT}    -sTCP:LISTEN -t 2>/dev/null; } | sort -u)
+                   lsof -nP -iTCP:${PROXY_PORT} -sTCP:LISTEN -t 2>/dev/null; } | sort -u)
 fi
 
 if [ -n "${PORT_PIDS:-}" ]; then
@@ -101,16 +107,29 @@ fi
 # Step 3: confirm the ports are actually free. If they're not, something
 # else (not us) is using them. Bail out instead of EADDRINUSE-ing.
 # ---------------------------------------------------------------------------
+in_use=0
 for _ in $(seq 1 25); do
     in_use=0
     if command -v ss >/dev/null 2>&1; then
-        ss -tln 2>/dev/null | awk -v dp=":${DASHBOARD_PORT}" -v pp=":${PROXY_PORT}" \
-            'index($4, dp) || index($4, pp) {found=1; exit} END{exit !found}'
-        [ $? -ne 0 ] && in_use=1
+        if ss -tln 2>/dev/null | awk -v dp=":${DASHBOARD_PORT}" -v pp=":${PROXY_PORT}" \
+            'index($4, dp) || index($4, pp) {found=1; exit} END{exit !found}'; then
+            in_use=1
+        fi
+    elif command -v lsof >/dev/null 2>&1; then
+        if lsof -nP -iTCP:${DASHBOARD_PORT} -sTCP:LISTEN >/dev/null 2>&1 || \
+           lsof -nP -iTCP:${PROXY_PORT} -sTCP:LISTEN >/dev/null 2>&1; then
+            in_use=1
+        fi
     fi
+
     [ "${in_use}" -eq 0 ] && break
     sleep 0.2
 done
+
+if [ "${in_use}" -ne 0 ]; then
+    echo "ERROR: ports ${DASHBOARD_PORT} and/or ${PROXY_PORT} are still in use; refusing to start." >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Step 4: build the dist if the entrypoint is missing or older than src.
@@ -123,7 +142,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 5: spawn the new daemon detached.
 # ---------------------------------------------------------------------------
-nohup env OPENCODE_ROUTER_PLUGIN_MODE=1 node dist/bin.js > /dev/null 2>&1 &
+nohup env CONFIG_DIR="${HOME}/.opencode" OPENCODE_ROUTER_PLUGIN_MODE=1 node dist/bin.js > /dev/null 2>&1 &
 NEW_PID=$!
 disown "${NEW_PID}" 2>/dev/null || true
 
