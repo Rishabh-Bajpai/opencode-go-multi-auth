@@ -67,7 +67,7 @@ function createProxySessionId(seed: string): string {
   return `router-${crypto.createHash('sha256').update(seed).digest('hex').slice(0, 24)}`
 }
 
-const MAX_BODY_BYTES = 10 * 1024 * 1024
+const MAX_BODY_BYTES = 100 * 1024 * 1024
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'transfer-encoding', 'te',
   'trailer', 'upgrade', 'proxy-authorization', 'proxy-authenticate',
@@ -494,9 +494,12 @@ export class ProxyServer {
         resolve(value)
       }
       const onData = (chunk: Buffer) => {
+        if (total > MAX_BODY_BYTES) {
+          finish(null)
+          return
+        }
         total += chunk.length
         if (total > MAX_BODY_BYTES) {
-          req.destroy()
           finish(null)
           return
         }
