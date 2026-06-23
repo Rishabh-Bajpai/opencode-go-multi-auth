@@ -67,7 +67,11 @@ function createProxySessionId(seed: string): string {
   return `router-${crypto.createHash('sha256').update(seed).digest('hex').slice(0, 24)}`
 }
 
-const MAX_BODY_BYTES = 100 * 1024 * 1024
+// No request body size limit. The proxy runs on the same machine as
+// OpenCode and mirrors its behaviour: OpenCode imposes no limit on
+// the request body either. The upstream provider still applies its
+// own hard cap (100 MB for the Anthropic Messages API), so anything
+// larger than that will be rejected upstream regardless.
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'transfer-encoding', 'te',
   'trailer', 'upgrade', 'proxy-authorization', 'proxy-authenticate',
@@ -111,8 +115,13 @@ export class ProxyServer {
     const headers = req.headers as Record<string, string | string[] | undefined>
     const body = await this.readBody(req)
     if (body === null) {
-      res.writeHead(413)
-      res.end('Request body too large')
+      // readBody returns null only when the client disconnected or the
+      // request stream errored before the body was received. The
+      // proxy no longer rejects oversized bodies; the upstream
+      // provider's own hard cap (e.g. 100 MB for Anthropic) is the
+      // de-facto ceiling.
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Client closed request before body was received' }))
       return
     }
 
@@ -494,15 +503,7 @@ export class ProxyServer {
         resolve(value)
       }
       const onData = (chunk: Buffer) => {
-        if (total > MAX_BODY_BYTES) {
-          finish(null)
-          return
-        }
         total += chunk.length
-        if (total > MAX_BODY_BYTES) {
-          finish(null)
-          return
-        }
         chunks.push(chunk)
       }
       const onEnd = () => finish(Buffer.concat(chunks))
