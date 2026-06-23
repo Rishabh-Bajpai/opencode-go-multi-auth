@@ -11,6 +11,20 @@ export { createLogger } from './logging/logger.js'
 export { NtfyNotifier } from './notification/ntfy.js'
 export { printSetupInstructions } from './plugin/index.js'
 
-export type { RouterConfig, ApiKey, RoutingStrategy } from './router/types.js'
-export { RoutingStrategy as RoutingStrategyEnum } from './router/types.js'
-export { DEFAULT_CONFIG } from './router/types.js'
+export type {
+  RouterConfig,
+  ApiKey,
+  RoutingStrategy,
+  RoutingStrategyInfo,
+  StoredApiKey,
+  UsageSnapshot,
+  KeySelection,
+  KeySelectionContext,
+} from './router/types.js'
+export {
+  RoutingStrategy as RoutingStrategyEnum,
+  ROUTING_STRATEGIES,
+  DEFAULT_CONFIG,
+  normalizeRoutingStrategy,
+  getRoutingStrategyInfo,
+} from './router/types.js'
