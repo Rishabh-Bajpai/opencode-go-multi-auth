@@ -3,7 +3,7 @@ import http from 'node:http'
 import type { AppLogger } from './logger.js'
 import type { StoredLogEntry } from '../storage/runtime-state-store.js'
 
-const MAX_RING_BUFFER = 500
+const MAX_RING_BUFFER = 5000
 
 interface LogEntry {
   timestamp: string

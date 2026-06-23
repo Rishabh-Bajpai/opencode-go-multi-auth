@@ -1195,10 +1195,11 @@ function bucketize(entries, bucketMs, rangeStart, rangeEnd) {
     if (idx < 0 || idx >= buckets.length) continue;
     const b = buckets[idx];
     b.requests += 1;
-    const modelKey = m.model || '(unknown)';
-    let mb = b.byModel.get(modelKey);
-    if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byModel.set(modelKey, mb); }
-    mb.requests += 1;
+    if (m.model) {
+      let mb = b.byModel.get(m.model);
+      if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byModel.set(m.model, mb); }
+      mb.requests += 1;
+    }
     const keyKey = m.keyAlias || '(unassigned)';
     let kb = b.byKey.get(keyKey);
     if (!kb) { kb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byKey.set(keyKey, kb); }
@@ -1210,12 +1211,17 @@ function bucketize(entries, bucketMs, rangeStart, rangeEnd) {
       b.byCategory.cacheWrite += tokens.cacheWrite || 0;
       b.byCategory.reasoning += tokens.reasoning || 0;
       if (typeof m.cost === 'number' && Number.isFinite(m.cost)) b.cost += m.cost;
-      mb.input += tokens.input || 0;
-      mb.output += tokens.output || 0;
-      mb.cacheRead += tokens.cacheRead || 0;
-      mb.cacheWrite += tokens.cacheWrite || 0;
-      mb.reasoning += tokens.reasoning || 0;
-      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+      if (m.model) {
+        const mb = b.byModel.get(m.model);
+        if (mb) {
+          mb.input += tokens.input || 0;
+          mb.output += tokens.output || 0;
+          mb.cacheRead += tokens.cacheRead || 0;
+          mb.cacheWrite += tokens.cacheWrite || 0;
+          mb.reasoning += tokens.reasoning || 0;
+          if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+        }
+      }
       kb.input += tokens.input || 0;
       kb.output += tokens.output || 0;
       kb.cacheRead += tokens.cacheRead || 0;
@@ -1234,10 +1240,6 @@ function aggregateAll(entries) {
     const m = e.meta || {};
     const t = m.tokens;
     totals.requests += 1;
-    const modelKey = m.model || '(unknown)';
-    let mb = byModel.get(modelKey);
-    if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; byModel.set(modelKey, mb); }
-    mb.requests += 1;
     if (t) {
       totals.input += t.input || 0;
       totals.output += t.output || 0;
@@ -1245,6 +1247,12 @@ function aggregateAll(entries) {
       totals.cacheWrite += t.cacheWrite || 0;
       totals.reasoning += t.reasoning || 0;
       if (typeof m.cost === 'number' && Number.isFinite(m.cost)) totals.cost += m.cost;
+    }
+    if (!m.model) continue;
+    let mb = byModel.get(m.model);
+    if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; byModel.set(m.model, mb); }
+    mb.requests += 1;
+    if (t) {
       mb.input += t.input || 0;
       mb.output += t.output || 0;
       mb.cacheRead += t.cacheRead || 0;
