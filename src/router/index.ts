@@ -42,13 +42,11 @@ function loadEnvConfig(): Partial<RouterConfig> {
     upstreamUrl: process.env.UPSTREAM_URL || DEFAULT_CONFIG.upstreamUrl,
     dashboardPort: Number(process.env.DASHBOARD_PORT) || DEFAULT_CONFIG.dashboardPort,
     proxyPort: Number(process.env.PROXY_PORT) || DEFAULT_CONFIG.proxyPort,
-    quotaLimit: Number(process.env.QUOTA_LIMIT) || DEFAULT_CONFIG.quotaLimit,
     cooldownMs: Number(process.env.COOLDOWN_MS) || DEFAULT_CONFIG.cooldownMs,
     circuitBreakerThreshold: Number(process.env.CIRCUIT_BREAKER_THRESHOLD) || DEFAULT_CONFIG.circuitBreakerThreshold,
     logLevel: process.env.LOG_LEVEL || DEFAULT_CONFIG.logLevel,
     configDir: process.env.CONFIG_DIR || DEFAULT_CONFIG.configDir,
     ntfyUrl: process.env.NTFY_URL || DEFAULT_CONFIG.ntfyUrl,
-    proactiveSwitchThreshold: Number(process.env.PROACTIVE_SWITCH_THRESHOLD) || DEFAULT_CONFIG.proactiveSwitchThreshold,
     requestTimeoutMs: readPositiveInt(process.env.REQUEST_TIMEOUT_MS, DEFAULT_CONFIG.requestTimeoutMs),
     upstreamHungTimeoutMs: readPositiveInt(process.env.UPSTREAM_HUNG_TIMEOUT_MS, DEFAULT_CONFIG.upstreamHungTimeoutMs),
   }
@@ -88,7 +86,7 @@ export async function createRouter(
   mergedConfig.strategy = normalizeRoutingStrategy(configStore.get('strategy') || mergedConfig.strategy)
   keyManager = new KeyManager(mergedConfig, persistRuntimeState)
   const circuitBreaker = new CircuitBreaker(mergedConfig.circuitBreakerThreshold)
-  quotaTracker = new QuotaTracker(mergedConfig.quotaLimit, 2000, persistRuntimeState)
+  quotaTracker = new QuotaTracker(2000, persistRuntimeState)
 
   const storedKeys = await secureStore.loadKeys()
   keyManager.loadStoredKeys(storedKeys)
@@ -108,9 +106,9 @@ export async function createRouter(
     {
       port: mergedConfig.proxyPort,
       upstreamUrl: mergedConfig.upstreamUrl,
-      proactiveSwitchThreshold: mergedConfig.proactiveSwitchThreshold,
       requestTimeoutMs: mergedConfig.requestTimeoutMs,
       upstreamHungTimeoutMs: mergedConfig.upstreamHungTimeoutMs,
+      fallbackCooldownMs: mergedConfig.cooldownMs,
     },
     keyManager,
     circuitBreaker,

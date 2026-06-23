@@ -186,7 +186,8 @@ export class DashboardServer {
         cooldownKeys: keys.filter((key) => key.status === 'cooldown').length,
         totalRequests: keys.reduce((sum, key) => sum + key.requestCount, 0),
         totalTokens: keys.reduce((sum, key) => sum + key.tokensUsed, 0),
-        estimatedCost: keys.reduce((sum, key) => sum + key.costAccumulated, 0),
+        observedCost: keys.reduce((sum, key) => sum + (key.costAccumulated || 0), 0),
+        quotaErrorCount: keys.reduce((sum, key) => sum + (key.quotaErrorCount || 0), 0),
         actualUsage,
       }
       res.json({ summary, keys })
@@ -253,6 +254,8 @@ export class DashboardServer {
       lastSessionId: key.lastSessionId,
       tokensUsed: quota.totalTokens,
       costAccumulated: quota.costAccumulated,
+      quotaErrorCount: key.quotaErrorCount,
+      lastQuotaError: key.lastQuotaError,
       quota,
       recentUsage: {
         last7d,

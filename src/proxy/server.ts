@@ -12,19 +12,19 @@ import {
   normalizeRoutingStrategy,
   type ApiKey,
   type KeySelection,
-  type UsageSnapshot,
+  type QuotaErrorSignal,
 } from '../router/types.js'
 import { buildUpstreamHeaders, extractCacheHeaders } from './header-passthrough.js'
 import { isQuota429, resolveCooldownMs } from './quota-detector.js'
-import { estimateCost, parseUsageData } from './response-parser.js'
+import { parseUsageData } from './response-parser.js'
 import { SessionAffinityStore } from './session-affinity.js'
 
 export interface ProxyServerConfig {
   port: number
   upstreamUrl: string
-  proactiveSwitchThreshold: number
   requestTimeoutMs: number
   upstreamHungTimeoutMs: number
+  fallbackCooldownMs: number
 }
 
 interface RequestPreparation {
@@ -167,14 +167,6 @@ export class ProxyServer {
         upstreamHeaders['x-session-id'] = upstreamSessionId
       }
 
-      if (
-        strategy === RoutingStrategy.PRIORITY_SPILLOVER &&
-        key.priority > Math.min(...this.keyManager.getActiveKeys().map((entry) => entry.priority))
-      ) {
-        const usage = this.quotaTracker.getUsage(key.id)
-        await this.notifier.proactiveSwitch(key.alias, usage.percentUsed)
-      }
-
       const startTime = Date.now()
       const upstreamHungTimer = this.config.upstreamHungTimeoutMs > 0
         ? setTimeout(() => {
@@ -203,11 +195,16 @@ export class ProxyServer {
           if (isQuota) {
             const remainingKeys = this.keyManager.getActiveKeys().filter((entry) => entry.id !== key.id && !attemptedKeyIds.has(entry.id)).length
             const now = Date.now()
-            const fallbackMs = 5 * 60 * 60 * 1000
-            const headerCooldownMs = resolveCooldownMs(Object.fromEntries(upstreamRes.headers), responseBody, now, fallbackMs)
-            const rollingCooldownMs = this.quotaTracker.getEstimatedCooldown(key.id, now)
-            const cooldownMs = rollingCooldownMs !== null ? Math.max(headerCooldownMs, rollingCooldownMs) : headerCooldownMs
-            this.keyManager.markExhausted(key.id, cooldownMs)
+            const headerCooldownMs = resolveCooldownMs(Object.fromEntries(upstreamRes.headers), responseBody, now, this.config.fallbackCooldownMs)
+            const resetAt = now + headerCooldownMs
+            const signal: QuotaErrorSignal = {
+              statusCode: upstreamRes.status,
+              occurredAt: now,
+              cooldownMs: headerCooldownMs,
+              resetAt,
+              message: this.extractQuotaMessage(responseBody, upstreamRes.status),
+            }
+            this.keyManager.markExhausted(key.id, headerCooldownMs, signal)
             this.keyManager.recordRequest(key.id, {
               statusCode: upstreamRes.status,
               durationMs: duration,
@@ -217,7 +214,7 @@ export class ProxyServer {
             })
             attemptedKeyIds.add(key.id)
 
-            const cooldownHours = (cooldownMs / 3_600_000).toFixed(1)
+            const cooldownHours = (headerCooldownMs / 3_600_000).toFixed(1)
             await this.notifier.keyExhausted(key.alias, upstreamRes.status, remainingKeys)
             this.logStream.emit(
               this.logger,
@@ -235,7 +232,8 @@ export class ProxyServer {
                 routeReason: reason,
                 selectedBySession,
                 sessionId: upstreamSessionId ?? sessionKey ?? null,
-                cooldownMs,
+                cooldownMs: headerCooldownMs,
+                quotaError: signal,
                 attempt: attempt + 1,
               },
             )
@@ -292,8 +290,8 @@ export class ProxyServer {
         const responseBody = await responseTextPromise
         const usageData = parseUsageData(responseBody, prepared.model ?? undefined)
         const tokens = usageData?.tokens ?? null
-        const cost = tokens ? (usageData?.cost ?? estimateCost(tokens)) : null
-        if (tokens && cost !== null) {
+        const cost = tokens ? (usageData?.cost ?? null) : null
+        if (tokens) {
           this.quotaTracker.recordUsage(key.id, tokens, cost)
         }
 
@@ -362,7 +360,6 @@ export class ProxyServer {
 
   private selectKey(sessionKey: string | undefined, attemptedKeyIds: Set<string>): RoutingDecision | null {
     const strategy = normalizeRoutingStrategy(this.getStrategy())
-    const usageByKey = this.getUsageSnapshots()
 
     if (sessionKey) {
       const preferredId = this.sessionAffinity.getPreferredKey(sessionKey)
@@ -380,8 +377,6 @@ export class ProxyServer {
     }
 
     const selection = this.keyManager.getNextKey(strategy, {
-      usageByKey,
-      proactiveSwitchThreshold: this.config.proactiveSwitchThreshold,
       excludeKeyIds: attemptedKeyIds,
     })
     if (!selection) return null
@@ -394,17 +389,21 @@ export class ProxyServer {
     }
   }
 
-  private getUsageSnapshots(): Map<string, UsageSnapshot> {
-    const entries = new Map<string, UsageSnapshot>()
-    for (const key of this.keyManager.getKeys()) {
-      const usage = this.quotaTracker.getUsage(key.id)
-      entries.set(key.id, {
-        costAccumulated: usage.costAccumulated,
-        remaining: usage.remaining,
-        percentUsed: usage.percentUsed,
-      })
+  private extractQuotaMessage(bodyText: string, statusCode: number): string {
+    try {
+      const json = JSON.parse(bodyText)
+      const error = (json && typeof json === 'object' ? json.error : null) ?? json
+      if (error && typeof error === 'object') {
+        const code = typeof error.code === 'string' ? error.code : ''
+        const type = typeof error.type === 'string' ? error.type : ''
+        const message = typeof error.message === 'string' ? error.message : ''
+        const parts = [code, type, message].filter(Boolean)
+        if (parts.length > 0) return parts.join(' · ')
+      }
+    } catch {
+      // fall through
     }
-    return entries
+    return `HTTP ${statusCode}`
   }
 
   private prepareRequest(body: Buffer, targetPath: string): RequestPreparation {

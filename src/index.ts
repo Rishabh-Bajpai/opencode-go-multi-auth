@@ -15,10 +15,10 @@ export { printSetupInstructions } from './plugin/index.js'
 export type {
   RouterConfig,
   ApiKey,
+  QuotaErrorSignal,
   RoutingStrategy,
   RoutingStrategyInfo,
   StoredApiKey,
-  UsageSnapshot,
   KeySelection,
   KeySelectionContext,
 } from './router/types.js'

@@ -4,7 +4,7 @@ import path from 'node:path'
 
 export interface StoredUsageLogEntry {
   timestamp: number
-  cost: number
+  cost: number | null
   input: number
   output: number
   cacheRead: number
@@ -20,7 +20,16 @@ export interface StoredQuotaEntry {
   tokensCacheWrite: number
   tokensReasoning: number
   costAccumulated: number
+  costObservedCount: number
   usageLog: StoredUsageLogEntry[]
+}
+
+export interface StoredQuotaError {
+  statusCode: number
+  occurredAt: number
+  cooldownMs: number
+  resetAt: number | null
+  message: string
 }
 
 export interface StoredKeyRuntimeState {
@@ -30,6 +39,8 @@ export interface StoredKeyRuntimeState {
   consecutiveErrors: number
   tokensUsed: number
   costAccumulated: number
+  quotaErrorCount: number
+  lastQuotaError: StoredQuotaError | null
   requestCount: number
   successCount: number
   errorCount: number

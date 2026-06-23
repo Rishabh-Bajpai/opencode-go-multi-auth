@@ -3,6 +3,7 @@ import type {
   KeySelection,
   KeySelectionContext,
   KeyStatus,
+  QuotaErrorSignal,
   RouterConfig,
   StoredApiKey,
 } from './types.js'
@@ -59,6 +60,8 @@ export class KeyManager {
       consecutiveErrors: 0,
       tokensUsed: 0,
       costAccumulated: 0,
+      quotaErrorCount: 0,
+      lastQuotaError: null,
       requestCount: 0,
       successCount: 0,
       errorCount: 0,
@@ -92,6 +95,8 @@ export class KeyManager {
       key.consecutiveErrors = this.normalizeNumber(state.consecutiveErrors)
       key.tokensUsed = this.normalizeNumber(state.tokensUsed)
       key.costAccumulated = this.normalizeNumber(state.costAccumulated)
+      key.quotaErrorCount = this.normalizeNumber(state.quotaErrorCount)
+      key.lastQuotaError = this.normalizeQuotaError(state.lastQuotaError)
       key.requestCount = this.normalizeNumber(state.requestCount)
       key.successCount = this.normalizeNumber(state.successCount)
       key.errorCount = this.normalizeNumber(state.errorCount)
@@ -154,19 +159,6 @@ export class KeyManager {
         const key = this.sortByPriority(active)[0]
         return { key, reason: `Priority failover selected highest priority key (${key.alias}).` }
       }
-      case RoutingStrategy.PRIORITY_SPILLOVER: {
-        const usageByKey = context.usageByKey ?? new Map()
-        const threshold = context.proactiveSwitchThreshold ?? 0.95
-        const sorted = this.sortByPriority(active)
-        const preferred = sorted.find((key) => (usageByKey.get(key.id)?.percentUsed ?? 0) < threshold) ?? sorted[0]
-        const usage = usageByKey.get(preferred.id)?.percentUsed
-        return {
-          key: preferred,
-          reason: usage !== undefined && usage >= threshold
-            ? `Priority spillover skipped fuller keys and selected ${preferred.alias}.`
-            : `Priority spillover kept traffic on ${preferred.alias}.`,
-        }
-      }
       case RoutingStrategy.ROUND_ROBIN: {
         const key = active[this.roundRobinIndex % active.length]
         this.roundRobinIndex = (this.roundRobinIndex + 1) % active.length
@@ -178,25 +170,27 @@ export class KeyManager {
         this.weightedCursor = (this.weightedCursor + 1) % weighted.length
         return { key, reason: `Weighted cycle selected ${key.alias} using weight ${key.weight}.` }
       }
-      case RoutingStrategy.HIGHEST_REMAINING_QUOTA: {
-        const usageByKey = context.usageByKey ?? new Map()
-        const sorted = [...active].sort((a, b) => {
-          const remainingDiff = (usageByKey.get(b.id)?.remaining ?? Infinity) - (usageByKey.get(a.id)?.remaining ?? Infinity)
-          if (remainingDiff !== 0) return remainingDiff
-          if (a.priority !== b.priority) return a.priority - b.priority
-          return a.alias.localeCompare(b.alias)
-        })
-        const key = sorted[0]
-        return { key, reason: `Highest remaining quota selected ${key.alias}.` }
-      }
     }
   }
 
-  markExhausted(id: string, cooldownMs?: number): void {
+  markExhausted(id: string, cooldownMs: number, signal?: QuotaErrorSignal): void {
     const key = this.getKeyById(id)
     if (!key) return
     key.status = 'cooldown'
-    key.cooldownUntil = Date.now() + (cooldownMs ?? this.cooldownMs)
+    key.cooldownUntil = Date.now() + cooldownMs
+    if (signal) {
+      key.quotaErrorCount += 1
+      key.lastQuotaError = signal
+    }
+    this.onChange?.()
+  }
+
+  clearQuotaError(id: string): void {
+    const key = this.getKeyById(id)
+    if (!key) return
+    if (key.quotaErrorCount === 0 && key.lastQuotaError === null) return
+    key.quotaErrorCount = 0
+    key.lastQuotaError = null
     this.onChange?.()
   }
 
@@ -213,7 +207,7 @@ export class KeyManager {
     key.status = 'active'
     key.cooldownUntil = null
     key.consecutiveErrors = 0
-    this.onChange?.()
+    this.clearQuotaError(id)
   }
 
   setEnabled(id: string, enabled: boolean): ApiKey | null {
@@ -299,6 +293,8 @@ export class KeyManager {
       consecutiveErrors: key.consecutiveErrors,
       tokensUsed: key.tokensUsed,
       costAccumulated: key.costAccumulated,
+      quotaErrorCount: key.quotaErrorCount,
+      lastQuotaError: key.lastQuotaError,
       requestCount: key.requestCount,
       successCount: key.successCount,
       errorCount: key.errorCount,
@@ -360,5 +356,23 @@ export class KeyManager {
       return value
     }
     return 'active'
+  }
+
+  private normalizeQuotaError(value: unknown): QuotaErrorSignal | null {
+    if (!value || typeof value !== 'object') return null
+    const v = value as Record<string, unknown>
+    const statusCode = Number(v.statusCode)
+    const occurredAt = Number(v.occurredAt)
+    const cooldownMs = Number(v.cooldownMs)
+    if (!Number.isFinite(statusCode) || !Number.isFinite(occurredAt) || !Number.isFinite(cooldownMs)) return null
+    const resetAtRaw = Number(v.resetAt)
+    const resetAt = Number.isFinite(resetAtRaw) && resetAtRaw > 0 ? resetAtRaw : null
+    return {
+      statusCode,
+      occurredAt,
+      cooldownMs,
+      resetAt,
+      message: typeof v.message === 'string' ? v.message : '',
+    }
   }
 }

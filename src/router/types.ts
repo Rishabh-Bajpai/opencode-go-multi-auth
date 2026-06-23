@@ -1,5 +1,13 @@
 export type KeyStatus = 'active' | 'cooldown' | 'exhausted' | 'error'
 
+export interface QuotaErrorSignal {
+  statusCode: number
+  occurredAt: number
+  cooldownMs: number
+  resetAt: number | null
+  message: string
+}
+
 export interface ApiKey {
   id: string
   key: string
@@ -13,6 +21,8 @@ export interface ApiKey {
   consecutiveErrors: number
   tokensUsed: number
   costAccumulated: number
+  quotaErrorCount: number
+  lastQuotaError: QuotaErrorSignal | null
   requestCount: number
   successCount: number
   errorCount: number
@@ -35,10 +45,8 @@ export interface StoredApiKey {
 
 export enum RoutingStrategy {
   PRIORITY_FAILOVER = 'priority_failover',
-  PRIORITY_SPILLOVER = 'priority_spillover',
   ROUND_ROBIN = 'round_robin',
   WEIGHTED_ROUND_ROBIN = 'weighted_round_robin',
-  HIGHEST_REMAINING_QUOTA = 'highest_remaining_quota',
 }
 
 export interface RoutingStrategyInfo {
@@ -53,15 +61,7 @@ export interface RoutingStrategyInfo {
   recommended?: boolean
 }
 
-export interface UsageSnapshot {
-  costAccumulated: number
-  remaining: number
-  percentUsed: number
-}
-
 export interface KeySelectionContext {
-  usageByKey?: Map<string, UsageSnapshot>
-  proactiveSwitchThreshold?: number
   excludeKeyIds?: Set<string>
 }
 
@@ -74,14 +74,12 @@ export interface RouterConfig {
   upstreamUrl: string
   dashboardPort: number
   proxyPort: number
-  quotaLimit: number
   cooldownMs: number
   circuitBreakerThreshold: number
   logLevel: string
   configDir: string
   strategy: RoutingStrategy
   ntfyUrl: string
-  proactiveSwitchThreshold: number
   requestTimeoutMs: number
   upstreamHungTimeoutMs: number
 }
@@ -92,21 +90,11 @@ export const ROUTING_STRATEGIES: RoutingStrategyInfo[] = [
     label: 'Priority Failover',
     description: 'Keep one account warm for cache reuse and only move to the next account when the current one is unavailable.',
     bestFor: 'Best default for cache-heavy coding sessions.',
-    behavior: 'Always uses the lowest priority number first. Session stickiness can still pin a warm conversation to its current account.',
+    behavior: 'Always uses the lowest priority number first. Session stickiness can still pin a warm conversation to its current account. Failover is triggered by upstream 4xx/5xx, not by an estimated quota.',
     cacheFriendly: true,
     usesPriority: true,
     usesWeight: false,
     recommended: true,
-  },
-  {
-    value: RoutingStrategy.PRIORITY_SPILLOVER,
-    label: 'Priority Spillover',
-    description: 'Stay on the primary account until it nears the quota threshold, then spill new requests to the next priority account.',
-    bestFor: 'Good when you want warm caches but fewer hard quota cutovers.',
-    behavior: 'Checks keys in priority order and skips any key that is already beyond the proactive switch threshold.',
-    cacheFriendly: true,
-    usesPriority: true,
-    usesWeight: false,
   },
   {
     value: RoutingStrategy.ROUND_ROBIN,
@@ -128,20 +116,16 @@ export const ROUTING_STRATEGIES: RoutingStrategyInfo[] = [
     usesPriority: false,
     usesWeight: true,
   },
-  {
-    value: RoutingStrategy.HIGHEST_REMAINING_QUOTA,
-    label: 'Highest Remaining Quota',
-    description: 'Choose the active account with the most remaining quota headroom.',
-    bestFor: 'Useful when you want to preserve the fullest accounts for long sessions.',
-    behavior: 'Ranks accounts by remaining monthly quota, then falls back to priority ordering when tied.',
-    cacheFriendly: false,
-    usesPriority: true,
-    usesWeight: false,
-  },
 ]
 
 export function normalizeRoutingStrategy(value?: string): RoutingStrategy {
   if (value === 'exhaustion_failover') return RoutingStrategy.PRIORITY_FAILOVER
+  // Legacy strategies map to the closest current strategy. Removed strategies
+  // (priority_spillover, highest_remaining_quota) become priority_failover
+  // since the router no longer estimates quota to drive pre-emptive routing.
+  if (value === 'priority_spillover' || value === 'highest_remaining_quota') {
+    return RoutingStrategy.PRIORITY_FAILOVER
+  }
   if (value && Object.values(RoutingStrategy).includes(value as RoutingStrategy)) {
     return value as RoutingStrategy
   }
@@ -156,14 +140,12 @@ export const DEFAULT_CONFIG: RouterConfig = {
   upstreamUrl: 'https://opencode.ai/zen/go/v1',
   dashboardPort: 18904,
   proxyPort: 18905,
-  quotaLimit: 60,
   cooldownMs: 5 * 60 * 60 * 1000,
   circuitBreakerThreshold: 3,
   logLevel: 'info',
   configDir: '',
   strategy: RoutingStrategy.PRIORITY_FAILOVER,
   ntfyUrl: '',
-  proactiveSwitchThreshold: 0.95,
   requestTimeoutMs: 0,
   upstreamHungTimeoutMs: 0,
 }

@@ -6,18 +6,10 @@ export interface TokenBreakdown {
   reasoning: number
 }
 
-export interface UsageData {
-  tokens: TokenBreakdown
-  cost: number
-}
-
 export interface ParsedUsageData {
   tokens: TokenBreakdown
   cost: number | null
 }
-
-const DEFAULT_INPUT_RATE = 3e-6
-const DEFAULT_OUTPUT_RATE = 15e-6
 
 function hasUsage(tokens: TokenBreakdown): boolean {
   return tokens.input > 0 || tokens.output > 0 || tokens.cacheRead > 0 || tokens.cacheWrite > 0 || tokens.reasoning > 0
@@ -121,20 +113,4 @@ export function parseUsageData(body: string, model?: string): ParsedUsageData | 
 
 export function parseTokenUsage(body: string, model?: string): TokenBreakdown | null {
   return parseUsageData(body, model)?.tokens ?? null
-}
-
-export function estimateCost(tokens: TokenBreakdown, inputRate?: number, outputRate?: number): number {
-  const iRate = inputRate ?? DEFAULT_INPUT_RATE
-  const oRate = outputRate ?? DEFAULT_OUTPUT_RATE
-
-  const cacheDiscount = 0.1
-  const input = tokens.input - tokens.cacheRead - tokens.cacheWrite
-  const cost =
-    Math.max(0, input) * iRate +
-    tokens.cacheRead * iRate * cacheDiscount +
-    tokens.cacheWrite * iRate +
-    tokens.output * oRate +
-    tokens.reasoning * oRate * 2
-
-  return cost
 }

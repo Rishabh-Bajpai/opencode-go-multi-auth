@@ -77,13 +77,4 @@ export class NtfyNotifier {
       'low',
     )
   }
-
-  async proactiveSwitch(alias: string, percentUsed: number): Promise<void> {
-    if (!this.enabled) return
-    await this.send(
-      `Proactive Switch: ${alias}`,
-      `Key "${alias}" at ${(percentUsed * 100).toFixed(0)}% quota usage. Switching to next key preemptively.`,
-      'low',
-    )
-  }
 }
