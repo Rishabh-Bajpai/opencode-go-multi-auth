@@ -42,6 +42,7 @@ export class DashboardServer {
         alias: k.alias,
         masked: `****${k.key.slice(-4)}`,
         status: k.status,
+        enabled: k.status !== 'disabled',
         cooldownUntil: k.cooldownUntil,
         tokensUsed: k.tokensUsed,
         costAccumulated: k.costAccumulated,
@@ -58,6 +59,15 @@ export class DashboardServer {
       const entry = this.keyManager.addKey(key, alias || undefined)
       await this.secureStore.addKey(key, entry.alias)
       res.json(entry)
+    })
+
+    this.app.put('/api/keys/:id/toggle', (req, res) => {
+      const result = this.keyManager.toggleKey(req.params.id)
+      if (!result) {
+        res.status(404).json({ error: 'Key not found' })
+        return
+      }
+      res.json({ id: req.params.id, status: result.status })
     })
 
     this.app.delete('/api/keys/:id', async (req, res) => {
@@ -92,6 +102,7 @@ export class DashboardServer {
           id: k.id,
           alias: k.alias,
           status: k.status,
+          enabled: k.status !== 'disabled',
           health: this.circuitBreaker.getState(k.id),
           cooldownUntil: k.cooldownUntil,
           tokensUsed: k.tokensUsed,

@@ -1,4 +1,4 @@
-import type { ApiKey, RouterConfig } from './types.js'
+import type { ApiKey, KeyStatus, RouterConfig } from './types.js'
 import { RoutingStrategy } from './types.js'
 
 export class KeyManager {
@@ -17,6 +17,7 @@ export class KeyManager {
   getActiveKeys(): ApiKey[] {
     const now = Date.now()
     return this.keys.filter(k => {
+      if (k.status === 'disabled') return false
       if (k.status === 'active') return true
       if (k.status === 'cooldown' && k.cooldownUntil && k.cooldownUntil <= now) {
         k.status = 'active'
@@ -93,5 +94,12 @@ export class KeyManager {
     key.status = 'active'
     key.cooldownUntil = null
     key.consecutiveErrors = 0
+  }
+
+  toggleKey(id: string): { status: KeyStatus } | null {
+    const key = this.getKeyById(id)
+    if (!key) return null
+    key.status = key.status === 'disabled' ? 'active' : 'disabled'
+    return { status: key.status }
   }
 }

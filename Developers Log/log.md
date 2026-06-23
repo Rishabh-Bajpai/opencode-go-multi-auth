@@ -123,3 +123,65 @@
 - `npm run build` — clean compilation
 - `NtfyNotifier.send()` test → successfully pushed to `https://ntfy.homelabrb.duckdns.org/Chanakya`
 - App startup with `NTFY_URL` set → shows `[NTFY] Notifications enabled → <url>`
+
+---
+
+## 2026-06-22 — Session 5: Dynamic Cooldown from Upstream Signals + Rolling Window Calculation
+
+### What was done
+
+**Analyzed new reference repo: `floze-the-genius/opencode-multi-auth-codex`**
+- ChatGPT Codex-based multi-auth (different architecture — uses OAuth tokens + direct Codex API, not OpenCode Go)
+- Key insight: `resolveRateLimitedUntil()` combines Retry-After headers + error body JSON + error text regex + stored window resets
+- Three-tier blocking model (rate limit, model unsupported, workspace deactivated) with independent cooldowns
+- `x-codex-*` header extraction from every response for proactive window tracking
+
+**Adopted patterns (universal HTTP API patterns, applicable to OpenCode Go):**
+
+1. **`parseRetryAfterHeaderMs()`** — Standard HTTP `Retry-After` header parsing:
+   - Priority: `retry-after-ms` > `retry-after` (seconds) > `retry-after` (HTTP-date)
+   - Returns ms until retry, or null
+
+2. **`parseResetFromErrorBody()`** — JSON error body parsing:
+   - `error.retry_after_ms` (milliseconds, direct)
+   - `error.retry_after` (seconds)
+   - `error.resets_at` / `error.reset_at` (epoch timestamp, handles both seconds and ms)
+
+3. **`parseResetFromErrorText()`** — Free-form text regex:
+   - Pattern: `/(?:retry[\s-]*after|try again in)\s*(\d+)\s*(seconds?|minutes?|hours?)/i`
+   - Also: `"Try again at <date>"` via Date.parse()
+
+4. **`extractCodexResetMs()`** — `x-codex-*` header parsing:
+   - `x-codex-primary-reset-at`, `x-codex-secondary-reset-at` (epoch timestamps)
+   - `x-codex-primary-reset-after-seconds`, `x-codex-secondary-reset-after-seconds`
+   - `x-ratelimit-reset` (legacy fallback)
+   - Catches any upstream pass-through from OpenAI/ChatGPT backend
+
+5. **`resolveCooldownMs()`** — Takes `Math.max(...candidates, fallbackMs)` from all sources
+
+**Rolling window calculation in `QuotaTracker`:**
+- Refactored from cumulative counters to timestamped usage ledger
+- Stores per-request `{ cost, timestamp }` entries (max 2000 per key)
+- `getEstimatedCooldown(keyId, now)`: On full $60 exhaustion, calculates the rolling 30-day window:
+  - Filters usage within last 30 days
+  - Sorts oldest-first
+  - Removes oldest entries until cumulative drops below $60
+  - Returns time until the oldest "exceeding" entry ages out of the 30-day window
+  - Returns null if not exhausted or no usage data
+
+**Updated `KeyManager.markExhausted()`:**
+- Now accepts optional `cooldownMs` parameter
+- Falls back to configurable `COOLDOWN_MS` (default 5h) if not provided
+
+**Wired in proxy server:**
+- On quota exhaustion: calls `resolveCooldownMs(headers, body, now, fallback)` for upstream signals
+- Then calls `quotaTracker.getEstimatedCooldown()` for rolling window estimate
+- Uses `Math.max(upstreamCooldown, rollingCooldown)` as the final cooldown duration
+- Logs computed cooldown: `Key "Primary" quota exhausted (HTTP 429), cooldown 22.0h, failing over`
+
+### Verification
+- `npm run build` — clean compilation
+- All 9 unit tests for parser functions pass (Retry-After seconds, HTTP-date, error body ms/resets_at, error text minutes/hours, codex headers, resolve max, codex+fallback)
+- Rolling window calculation verified: $50/60 → no cooldown; $65/60 with 11 entries over 10 days → ~528 hours (22 days, matching the rolling window calculation)
+- End-to-end test: dashboard serves status, proxy forwards to upstream, logs display properly
+- `repos/` excluded from git tracking (reference clones only)

@@ -31,7 +31,7 @@ body {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 24px;
 }
@@ -97,11 +97,14 @@ body {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .card-header h2 {
   font-size: 15px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .card-body {
@@ -120,6 +123,7 @@ body {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .btn-primary {
@@ -146,8 +150,11 @@ body {
   color: white;
 }
 
+.btn-danger:hover {
+  background: #da3633;
+}
+
 .select {
-  width: 100%;
   padding: 10px 12px;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -155,6 +162,7 @@ body {
   border-radius: 8px;
   font-size: 14px;
   cursor: pointer;
+  width: 100%;
 }
 
 .input {
@@ -173,6 +181,7 @@ body {
   border-color: var(--accent);
 }
 
+/* Key management */
 .key-item {
   display: flex;
   justify-content: space-between;
@@ -182,10 +191,15 @@ body {
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
+  transition: opacity 0.2s;
 }
 
 .key-item:last-child {
   margin-bottom: 0;
+}
+
+.key-disabled {
+  opacity: 0.5;
 }
 
 .key-info {
@@ -205,6 +219,12 @@ body {
   font-family: monospace;
 }
 
+.key-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .key-status {
   font-size: 11px;
   padding: 2px 8px;
@@ -215,17 +235,70 @@ body {
 .key-status.cooldown { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
 .key-status.exhausted { background: rgba(248, 81, 73, 0.15); color: var(--red); }
 .key-status.error { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.key-status.disabled { background: rgba(110, 118, 129, 0.15); color: var(--text-muted); }
 
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  transition: 0.3s;
+}
+
+.toggle-slider:before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(16px);
+  background: white;
+}
+
+/* Status cards */
 .status-card {
   padding: 12px;
   margin-bottom: 10px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
+  transition: opacity 0.2s;
 }
 
 .status-card:last-child {
   margin-bottom: 0;
+}
+
+.status-disabled {
+  opacity: 0.5;
 }
 
 .status-card-header {
@@ -240,6 +313,13 @@ body {
   font-size: 14px;
 }
 
+.status-card-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .health-indicator {
   width: 10px;
   height: 10px;
@@ -249,6 +329,7 @@ body {
 .health-indicator.closed { background: var(--green); }
 .health-indicator.open { background: var(--red); }
 .health-indicator.half_open { background: var(--yellow); }
+.health-indicator.disabled { background: var(--text-muted); }
 
 .quota-bar {
   height: 8px;
@@ -276,29 +357,126 @@ body {
   margin-top: 4px;
 }
 
-#log-viewer {
-  height: 300px;
-  overflow-y: auto;
-  font-family: 'SF Mono', Monaco, monospace;
+/* Log viewer */
+.log-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.log-filter {
+  width: 140px;
+  margin-bottom: 0;
+  padding: 6px 10px;
   font-size: 12px;
-  line-height: 1.6;
+}
+
+.log-filter-select {
+  width: 120px;
+  margin-bottom: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.pause-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#log-viewer {
+  height: 400px;
+  overflow-y: auto;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
   background: var(--bg-primary);
   border-radius: 8px;
-  padding: 12px;
+  padding: 0;
 }
 
-.log-entry {
-  padding: 2px 0;
+.log-row {
+  display: grid;
+  grid-template-columns: 75px 42px 50px 1fr 50px 100px 60px 1fr 80px;
+  gap: 6px;
+  padding: 4px 12px;
   border-bottom: 1px solid rgba(48, 54, 61, 0.3);
+  align-items: center;
+  white-space: nowrap;
 }
 
-.log-entry .level { font-weight: 600; margin-right: 8px; }
-.log-entry .level.info { color: var(--accent); }
-.log-entry .level.warn { color: var(--yellow); }
-.log-entry .level.error { color: var(--red); }
-.log-entry .level.debug { color: var(--text-muted); }
-.log-entry .timestamp { color: var(--text-muted); margin-right: 8px; }
+.log-row:hover {
+  background: var(--bg-hover);
+}
 
+.col-time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.col-level {
+  font-weight: 600;
+  font-size: 10px;
+  text-align: center;
+}
+
+.l-info { color: var(--accent); }
+.l-warn { color: var(--yellow); }
+.l-error { color: var(--red); }
+.l-debug { color: var(--text-muted); }
+
+.col-method {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.col-path {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.col-status {
+  font-weight: 600;
+  text-align: center;
+}
+
+.st-ok { color: var(--green); }
+.st-warn { color: var(--yellow); }
+.st-error { color: var(--red); }
+
+.col-key {
+  color: var(--purple);
+}
+
+.col-dur {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.col-tokens {
+  font-size: 10px;
+}
+
+.token-badge {
+  color: var(--text-secondary);
+  background: rgba(88, 166, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.col-cost {
+  color: var(--yellow);
+  text-align: right;
+  font-size: 10px;
+}
+
+/* Modal */
 .modal-overlay {
   display: none;
   position: fixed;
@@ -366,3 +544,9 @@ body {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }

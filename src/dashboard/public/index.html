@@ -49,7 +49,24 @@
       <section class="card" id="logs-section">
         <div class="card-header">
           <h2>Log Viewer</h2>
-          <button class="btn btn-secondary" id="clear-logs-btn">Clear</button>
+          <div class="log-controls">
+            <input type="text" class="input log-filter" id="filter-path" placeholder="Filter path...">
+            <input type="text" class="input log-filter" id="filter-status" placeholder="Status...">
+            <select class="select log-filter-select" id="filter-key">
+              <option value="">All Keys</option>
+            </select>
+            <select class="select log-filter-select" id="filter-level">
+              <option value="">All Levels</option>
+              <option value="info">Info</option>
+              <option value="warn">Warn</option>
+              <option value="error">Error</option>
+              <option value="debug">Debug</option>
+            </select>
+            <label class="pause-label">
+              <input type="checkbox" id="pause-logs"> Pause
+            </label>
+            <button class="btn btn-secondary" id="clear-logs-btn">Clear</button>
+          </div>
         </div>
         <div class="card-body" id="log-viewer"></div>
       </section>

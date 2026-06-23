@@ -161,7 +161,16 @@ export class ProxyServer {
 
         if (sessionKey) this.sessionAffinity.setPreferredKey(sessionKey, key.id)
 
-        this.logStream.emit(this.logger, 'info', `${req.method} ${targetPath} -> ${upstreamRes.status} via "${key.alias}" (${duration}ms)`)
+        this.logStream.emit(this.logger, 'info', `${req.method} ${targetPath} -> ${upstreamRes.status}`, {
+          method: req.method,
+          path: targetPath,
+          statusCode: upstreamRes.status,
+          keyAlias: key.alias,
+          keyId: key.id,
+          duration,
+          tokens: tokens || null,
+          cost: tokens ? estimateCost(tokens) : null,
+        })
 
         const responseHeaders: Record<string, string> = {}
         upstreamRes.headers.forEach((value, key) => {

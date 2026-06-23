@@ -1,4 +1,4 @@
-export type KeyStatus = 'active' | 'cooldown' | 'exhausted' | 'error'
+export type KeyStatus = 'active' | 'cooldown' | 'exhausted' | 'error' | 'disabled'
 
 export interface ApiKey {
   id: string
