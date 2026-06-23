@@ -239,3 +239,38 @@
 - Toggle API tested: key flips active ↔ disabled, other keys unaffected
 - Structured logs verified: `POST /chat/completions` → status=404, key=rishabhbajpai24, dur=147, tokens=null
 - Dashboard HTML loads, filters render, WebSocket connects
+
+---
+
+## 2026-06-23 — Session 7: Fix Multi-Instance Hang (EADDRINUSE)
+
+### Problem
+When a second opencode instance started in another terminal, it would **hang indefinitely**. The plugin tried to start proxy (18905) and dashboard (18904) servers, but those ports were already bound by the first instance. The `server.listen()` calls in both `ProxyServer.start()` and `DashboardServer.start()` never attached an `'error'` event handler, so the Promise never resolved or rejected — causing the hang.
+
+### Root Cause
+```typescript
+// BEFORE (both servers)
+async start(): Promise<void> {
+    return new Promise((resolve) => {  // ← no reject!
+      this.server.listen(port, () => resolve())
+      // No error handler — EADDRINUSE silently ignored, Promise hangs forever
+    })
+  }
+```
+
+### Fix
+- **`src/proxy/server.ts`** — Added `this.server.on('error', (err) => reject(err))` before `listen()`
+- **`src/dashboard/server.ts`** — Same fix
+
+Now when ports are taken, the Promise rejects with `EADDRINUSE`, which is caught by `opencode-plugin.ts`'s existing handler that gracefully returns `null` (reuses running instance).
+
+### Config Cleanup
+- Removed old `@guard22/opencode-multi-auth-codex` plugin from `~/.config/opencode/opencode.json`
+- Removed `~/.config/opencode/plugins/multi-auth-codex.js` loader file
+- Moved `opencode-go` provider baseURL to global config (`~/.config/opencode/opencode.json`)
+- Cleaned `~/.opencode/opencode.json` to just the schema
+
+### Verification
+- `npm run build` — clean compilation
+- Committed: `fix: handle EADDRINUSE in proxy and dashboard server start() to prevent hang on multi-instance`
+
