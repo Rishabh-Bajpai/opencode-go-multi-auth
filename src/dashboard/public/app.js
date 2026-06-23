@@ -273,8 +273,8 @@ function connectWebSocket() {
 async function backfillLogs() {
   try {
     const logs = await api.recentLogs();
-    state.archivedLogs = [];
-    state.recentLogs = [];
+    // If WebSocket already populated the buffer, don't nuke it
+    if (state.recentLogs.length > 0) return;
     for (const e of logs) ingestLog(e, { initial: true });
   } catch (err) {
     console.warn('Failed to backfill logs', err);

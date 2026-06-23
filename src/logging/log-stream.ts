@@ -69,7 +69,7 @@ export class LogStream {
     }
   }
 
-  getRecentLogs(count = 100): LogEntry[] {
+  getRecentLogs(count = MAX_RING_BUFFER): LogEntry[] {
     return this.ringBuffer.slice(-count)
   }
 
