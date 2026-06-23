@@ -5,7 +5,7 @@
 
 ## What this repo is
 
-A TypeScript proxy plugin that pools multiple OpenCode Go API subscriptions
+A TypeScript proxy plugin that pools multiple OpenCode Go + Zen API subscriptions
 into a single endpoint, with a local web UI dashboard. It runs as an
 **OpenCode plugin** (auto-starts a shared detached daemon) or as a
 **standalone CLI**. See `README.md` for end-user docs; this file is for
@@ -42,7 +42,7 @@ Add new tooling only after confirming with the user.
 - The **daemon entry** is `src/bin.ts` (compiled to `dist/bin.js`). The
   daemon listens on:
   - `18905` — the proxy / API endpoint (this is what opencode points at
-    via `provider.opencode-go.options.baseURL`)
+    via `provider.opencode-go.options.baseURL` or `provider.opencode-zen.options.baseURL`)
   - `18904` — the dashboard web UI
 - The daemon is **detached** and **shared across opencode sessions**.
   Closing the opencode UI does **not** stop the daemon. Killing the
@@ -102,12 +102,14 @@ not the agent's.
 ```
 opencode CLI
   → provider.opencode-go.options.baseURL  (default http://localhost:18905)
+  → provider.opencode-zen.options.baseURL (default http://localhost:18905/zen)
   → src/proxy/server.ts handleRequest
      → keyManager.selectKey (routing strategy + session stickiness)
      → circuitBreaker.isAvailable
      → buildUpstreamHeaders + cache-header passthrough
      → fetch(upstreamUrl, signal)
-  → https://opencode.ai/zen/go/v1/{messages|chat/completions}
+  → https://opencode.ai/zen/go/v1/{messages|chat/completions}  (Go, no /zen prefix)
+  → https://opencode.ai/zen/v1/{messages|chat/completions}     (Zen, /zen prefix stripped)
   → response streamed byte-for-byte back to opencode
 ```
 
@@ -123,6 +125,13 @@ Key invariants to preserve:
   (minimax-m*, Qwen3.7, etc.) on `/messages` and OpenAI-compat models
   (DeepSeek V4, GLM, Kimi) on `/chat/completions`. The proxy
   (`buildUpstreamUrl`) rewrites paths so `/v1` is not duplicated.
+- **Dual upstream:** The proxy detects a `/zen` path prefix in the
+  incoming request URL and routes to the Zen upstream
+  (`upstreamUrlZen`, default `https://opencode.ai/zen/v1`) instead of
+  the Go upstream (`upstreamUrl`, default `https://opencode.ai/zen/go/v1`).
+  The `/zen` prefix is stripped before forwarding. Both upstreams
+  support Anthropic and OpenAI formats. Configured in OpenCode as
+  `api: opencode-go` with `baseURL: http://localhost:18905/zen`.
 - **Auth headers:** the proxy always sets both `Authorization: Bearer …`
   AND `x-api-key: …` because some Anthropic-style endpoints reject one
   of them. Do not narrow this to a single header.
