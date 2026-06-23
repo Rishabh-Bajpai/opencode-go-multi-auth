@@ -42,6 +42,12 @@ export class SessionAffinityStore {
     const promptKey = this.getHeader(headers, 'prompt-cache-key')
     if (promptKey) return promptKey
 
+    const promptKeyUnderscore = this.getHeader(headers, 'prompt_cache_key')
+    if (promptKeyUnderscore) return promptKeyUnderscore
+
+    const cacheControl = this.getHeader(headers, 'cache_control')
+    if (cacheControl) return cacheControl
+
     return undefined
   }
 

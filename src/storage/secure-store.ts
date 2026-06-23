@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import type { StoredApiKey } from '../router/types.js'
 
 const ALGORITHM = 'aes-256-gcm'
 const KEY_LENGTH = 32
@@ -39,7 +40,7 @@ export class SecureStore {
     return this.masterKey
   }
 
-  async saveKeys(keys: Array<{ key: string; alias: string }>): Promise<void> {
+  async saveKeys(keys: StoredApiKey[]): Promise<void> {
     const key = this.deriveKey()
     const iv = crypto.randomBytes(IV_LENGTH)
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv)
@@ -59,7 +60,7 @@ export class SecureStore {
     fs.writeFileSync(this.filePath, JSON.stringify(payload), 'utf8')
   }
 
-  async loadKeys(): Promise<Array<{ key: string; alias: string }>> {
+  async loadKeys(): Promise<StoredApiKey[]> {
     if (!fs.existsSync(this.filePath)) return []
 
     try {
@@ -75,22 +76,56 @@ export class SecureStore {
       decipher.setAuthTag(tag)
 
       const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()])
-      return JSON.parse(decrypted.toString('utf8'))
+      const parsed = JSON.parse(decrypted.toString('utf8'))
+      if (!Array.isArray(parsed)) return []
+
+      return parsed
+        .map((entry) => this.normalizeEntry(entry))
+        .filter((entry): entry is StoredApiKey => entry !== null)
     } catch {
       return []
     }
   }
 
-  async addKey(apiKey: string, alias: string): Promise<void> {
+  async addKey(entry: StoredApiKey): Promise<void> {
     const keys = await this.loadKeys()
-    keys.push({ key: apiKey, alias })
+    keys.push(entry)
     await this.saveKeys(keys)
   }
 
-  async removeKey(alias: string): Promise<void> {
+  async removeKey(id: string): Promise<void> {
     let keys = await this.loadKeys()
-    keys = keys.filter(k => k.alias !== alias)
+    keys = keys.filter(k => k.id !== id)
     await this.saveKeys(keys)
+  }
+
+  async updateKey(entry: StoredApiKey): Promise<void> {
+    const keys = await this.loadKeys()
+    const idx = keys.findIndex(key => key.id === entry.id)
+    if (idx === -1) {
+      keys.push(entry)
+    } else {
+      keys[idx] = entry
+    }
+    await this.saveKeys(keys)
+  }
+
+  private normalizeEntry(entry: unknown): StoredApiKey | null {
+    if (!entry || typeof entry !== 'object') return null
+    const value = entry as Record<string, unknown>
+    const key = typeof value.key === 'string' ? value.key : null
+    const alias = typeof value.alias === 'string' && value.alias.trim() ? value.alias : null
+    if (!key || !alias) return null
+
+    return {
+      id: typeof value.id === 'string' && value.id ? value.id : crypto.randomUUID(),
+      key,
+      alias,
+      addedAt: typeof value.addedAt === 'number' ? value.addedAt : Date.now(),
+      enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+      priority: typeof value.priority === 'number' && Number.isFinite(value.priority) ? value.priority : 1,
+      weight: typeof value.weight === 'number' && Number.isFinite(value.weight) ? value.weight : 1,
+    }
   }
 
   keyExists(): boolean {

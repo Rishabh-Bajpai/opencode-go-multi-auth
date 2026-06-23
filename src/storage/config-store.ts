@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import type { RouterConfig } from '../router/types.js'
-import { DEFAULT_CONFIG } from '../router/types.js'
+import { DEFAULT_CONFIG, normalizeRoutingStrategy } from '../router/types.js'
 
 export class ConfigStore {
   private readonly filePath: string
@@ -37,6 +37,7 @@ export class ConfigStore {
         const raw = fs.readFileSync(this.filePath, 'utf8')
         const parsed = JSON.parse(raw)
         this.config = { ...DEFAULT_CONFIG, ...parsed }
+        this.config.strategy = normalizeRoutingStrategy(this.config.strategy)
       }
     } catch {
       this.config = { ...DEFAULT_CONFIG }

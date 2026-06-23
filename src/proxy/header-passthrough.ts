@@ -1,7 +1,9 @@
 const CACHE_HEADERS = new Set([
   'x-session-id',
   'prompt-cache-key',
+  'prompt_cache_key',
   'cache-control',
+  'cache_control',
 ])
 
 const HOP_BY_HOP = new Set([

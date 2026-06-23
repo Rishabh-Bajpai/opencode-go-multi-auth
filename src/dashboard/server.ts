@@ -8,7 +8,12 @@ import type { QuotaTracker } from '../router/quota-tracker.js'
 import { LogStream } from '../logging/log-stream.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
-import { RoutingStrategy } from '../router/types.js'
+import {
+  RoutingStrategy,
+  ROUTING_STRATEGIES,
+  normalizeRoutingStrategy,
+  type ApiKey,
+} from '../router/types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
@@ -37,37 +42,66 @@ export class DashboardServer {
     this.app.use(express.static(PUBLIC_DIR))
 
     this.app.get('/api/keys', async (_req, res) => {
-      const keys = this.keyManager.getKeys().map(k => ({
-        id: k.id,
-        alias: k.alias,
-        masked: `****${k.key.slice(-4)}`,
-        status: k.status,
-        enabled: k.status !== 'disabled',
-        cooldownUntil: k.cooldownUntil,
-        tokensUsed: k.tokensUsed,
-        costAccumulated: k.costAccumulated,
-      }))
-      res.json(keys)
+      res.json(this.serializeKeys())
     })
 
     this.app.post('/api/keys', async (req, res) => {
-      const { key, alias } = req.body
+      const { key, alias, priority, weight, enabled } = req.body
       if (!key || typeof key !== 'string') {
         res.status(400).json({ error: 'Key is required' })
         return
       }
-      const entry = this.keyManager.addKey(key, alias || undefined)
-      await this.secureStore.addKey(key, entry.alias)
-      res.json(entry)
+
+      const entry = this.keyManager.addKey(key, alias || undefined, {
+        enabled: typeof enabled === 'boolean' ? enabled : true,
+        priority: typeof priority === 'number' ? priority : 1,
+        weight: typeof weight === 'number' ? weight : 1,
+      })
+      await this.persistKeys()
+      res.json(this.serializeKey(entry))
     })
 
-    this.app.put('/api/keys/:id/toggle', (req, res) => {
-      const result = this.keyManager.toggleKey(req.params.id)
-      if (!result) {
+    this.app.put('/api/keys/:id', async (req, res) => {
+      const { alias, enabled, priority, weight } = req.body ?? {}
+      const updated = this.keyManager.updateKeySettings(req.params.id, {
+        alias,
+        enabled,
+        priority,
+        weight,
+      })
+      if (!updated) {
         res.status(404).json({ error: 'Key not found' })
         return
       }
-      res.json({ id: req.params.id, status: result.status })
+
+      await this.persistKeys()
+      res.json(this.serializeKey(updated))
+    })
+
+    this.app.put('/api/keys/:id/toggle', async (req, res) => {
+      const enabled = typeof req.body?.enabled === 'boolean'
+        ? req.body.enabled
+        : !this.keyManager.getKeyById(req.params.id)?.enabled
+
+      const updated = this.keyManager.setEnabled(req.params.id, enabled)
+      if (!updated) {
+        res.status(404).json({ error: 'Key not found' })
+        return
+      }
+
+      await this.persistKeys()
+      res.json(this.serializeKey(updated))
+    })
+
+    this.app.post('/api/keys/:id/reset-cooldown', (req, res) => {
+      const key = this.keyManager.getKeyById(req.params.id)
+      if (!key) {
+        res.status(404).json({ error: 'Key not found' })
+        return
+      }
+
+      this.keyManager.resetCooldown(req.params.id)
+      res.json(this.serializeKey(key))
     })
 
     this.app.delete('/api/keys/:id', async (req, res) => {
@@ -76,17 +110,23 @@ export class DashboardServer {
         res.status(404).json({ error: 'Key not found' })
         return
       }
+
       this.keyManager.removeKey(req.params.id)
-      await this.secureStore.removeKey(key.alias)
+      await this.secureStore.removeKey(req.params.id)
       res.json({ success: true })
     })
 
     this.app.get('/api/strategy', (_req, res) => {
-      res.json({ strategy: this.configStore.get('strategy') || 'exhaustion_failover' })
+      const strategy = normalizeRoutingStrategy(this.configStore.get('strategy'))
+      res.json({ strategy })
+    })
+
+    this.app.get('/api/strategies', (_req, res) => {
+      res.json({ strategies: ROUTING_STRATEGIES })
     })
 
     this.app.put('/api/strategy', (req, res) => {
-      const { strategy } = req.body
+      const strategy = normalizeRoutingStrategy(req.body?.strategy)
       if (!Object.values(RoutingStrategy).includes(strategy)) {
         res.status(400).json({ error: 'Invalid strategy' })
         return
@@ -96,21 +136,16 @@ export class DashboardServer {
     })
 
     this.app.get('/api/status', (_req, res) => {
-      const keys = this.keyManager.getKeys().map(k => {
-        this.quotaTracker.applyStateToKey(k)
-        return {
-          id: k.id,
-          alias: k.alias,
-          status: k.status,
-          enabled: k.status !== 'disabled',
-          health: this.circuitBreaker.getState(k.id),
-          cooldownUntil: k.cooldownUntil,
-          tokensUsed: k.tokensUsed,
-          costAccumulated: k.costAccumulated,
-          quota: this.quotaTracker.getUsage(k.id),
-        }
-      })
-      res.json({ keys })
+      const keys = this.serializeKeys()
+      const summary = {
+        totalKeys: keys.length,
+        enabledKeys: keys.filter((key) => key.enabled).length,
+        activeKeys: keys.filter((key) => key.enabled && key.status === 'active').length,
+        cooldownKeys: keys.filter((key) => key.status === 'cooldown').length,
+        totalRequests: keys.reduce((sum, key) => sum + key.requestCount, 0),
+        totalCost: keys.reduce((sum, key) => sum + key.costAccumulated, 0),
+      }
+      res.json({ summary, keys })
     })
 
     this.app.get('/api/logs', (_req, res) => {
@@ -134,5 +169,43 @@ export class DashboardServer {
         resolve()
       }
     })
+  }
+
+  private async persistKeys(): Promise<void> {
+    await this.secureStore.saveKeys(this.keyManager.toStoredEntries())
+  }
+
+  private serializeKeys() {
+    return this.keyManager.getKeys().map((key) => this.serializeKey(key))
+  }
+
+  private serializeKey(key: ApiKey) {
+    const quota = this.quotaTracker.getUsageBreakdown(key.id)
+    key.tokensUsed = quota.totalTokens
+    key.costAccumulated = quota.costAccumulated
+
+    return {
+      id: key.id,
+      alias: key.alias,
+      masked: `****${key.key.slice(-4)}`,
+      status: key.status,
+      enabled: key.enabled,
+      priority: key.priority,
+      weight: key.weight,
+      addedAt: key.addedAt,
+      cooldownUntil: key.cooldownUntil,
+      health: this.circuitBreaker.getState(key.id),
+      requestCount: key.requestCount,
+      successCount: key.successCount,
+      errorCount: key.errorCount,
+      averageLatencyMs: key.averageLatencyMs,
+      lastUsedAt: key.lastUsedAt,
+      lastStatusCode: key.lastStatusCode,
+      lastModel: key.lastModel,
+      lastSessionId: key.lastSessionId,
+      tokensUsed: quota.totalTokens,
+      costAccumulated: quota.costAccumulated,
+      quota,
+    }
   }
 }

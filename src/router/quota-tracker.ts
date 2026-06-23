@@ -47,6 +47,20 @@ export class QuotaTracker {
     }
   }
 
+  getUsageBreakdown(keyId: string) {
+    const usage = this.getUsage(keyId)
+    return {
+      ...usage,
+      tokensBreakdown: {
+        input: usage.tokensInput,
+        output: usage.tokensOutput,
+        cacheRead: usage.tokensCacheRead,
+        cacheWrite: usage.tokensCacheWrite,
+        reasoning: usage.tokensReasoning,
+      },
+    }
+  }
+
   recordUsage(keyId: string, tokens: TokenBreakdown, cost: number): void {
     let e = this.store.get(keyId)
     if (!e) { e = this.emptyEntry(keyId); this.store.set(keyId, e) }

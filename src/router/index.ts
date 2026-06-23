@@ -10,7 +10,7 @@ import { ConfigStore } from '../storage/config-store.js'
 import { NtfyNotifier } from '../notification/ntfy.js'
 import { printSetupInstructions } from '../plugin/index.js'
 import type { RouterConfig } from './types.js'
-import { DEFAULT_CONFIG } from './types.js'
+import { DEFAULT_CONFIG, normalizeRoutingStrategy } from './types.js'
 
 export interface RouterInstance {
   keyManager: KeyManager
@@ -36,6 +36,7 @@ function loadEnvConfig(): Partial<RouterConfig> {
     logLevel: process.env.LOG_LEVEL || DEFAULT_CONFIG.logLevel,
     configDir: process.env.CONFIG_DIR || DEFAULT_CONFIG.configDir,
     ntfyUrl: process.env.NTFY_URL || DEFAULT_CONFIG.ntfyUrl,
+    proactiveSwitchThreshold: Number(process.env.PROACTIVE_SWITCH_THRESHOLD) || DEFAULT_CONFIG.proactiveSwitchThreshold,
   }
 }
 
@@ -48,14 +49,13 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
   const logger = createLogger(mergedConfig.logLevel)
   const logStream = new LogStream()
 
+  mergedConfig.strategy = normalizeRoutingStrategy(configStore.get('strategy') || mergedConfig.strategy)
   const keyManager = new KeyManager(mergedConfig)
   const circuitBreaker = new CircuitBreaker(mergedConfig.circuitBreakerThreshold)
   const quotaTracker = new QuotaTracker(mergedConfig.quotaLimit)
 
   const storedKeys = await secureStore.loadKeys()
-  for (const { key, alias } of storedKeys) {
-    keyManager.addKey(key, alias)
-  }
+  keyManager.loadStoredKeys(storedKeys)
 
   const notifier = new NtfyNotifier(mergedConfig.ntfyUrl)
 
@@ -64,12 +64,17 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
   }
 
   const proxyServer = new ProxyServer(
-    { port: mergedConfig.proxyPort, upstreamUrl: mergedConfig.upstreamUrl },
+    {
+      port: mergedConfig.proxyPort,
+      upstreamUrl: mergedConfig.upstreamUrl,
+      proactiveSwitchThreshold: mergedConfig.proactiveSwitchThreshold,
+    },
     keyManager,
     circuitBreaker,
     quotaTracker,
     logStream,
     logger,
+    () => normalizeRoutingStrategy(configStore.get('strategy')),
     notifier,
   )
 
