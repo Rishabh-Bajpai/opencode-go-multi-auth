@@ -475,7 +475,8 @@ let chartState = {
 };
 
 function pushChartPoint(entry) {
-  const t = entry.tokens || {};
+  const meta = entry.meta || {};
+  const t = meta.tokens || {};
   if (!entry.timestamp) return;
   const ts = new Date(entry.timestamp).getTime();
   if (Number.isNaN(ts)) return;
@@ -1190,39 +1191,38 @@ function bucketize(entries, bucketMs, rangeStart, rangeEnd) {
     if (!Number.isFinite(ts)) continue;
     const m = e.meta || {};
     const tokens = m.tokens || null;
-    if (!tokens) continue;
     const idx = indexFor(ts);
     if (idx < 0 || idx >= buckets.length) continue;
     const b = buckets[idx];
     b.requests += 1;
-    b.byCategory.input += tokens.input || 0;
-    b.byCategory.output += tokens.output || 0;
-    b.byCategory.cacheRead += tokens.cacheRead || 0;
-    b.byCategory.cacheWrite += tokens.cacheWrite || 0;
-    b.byCategory.reasoning += tokens.reasoning || 0;
-    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) {
-      b.cost += m.cost;
-    }
     const modelKey = m.model || '(unknown)';
     let mb = b.byModel.get(modelKey);
     if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byModel.set(modelKey, mb); }
-    mb.input += tokens.input || 0;
-    mb.output += tokens.output || 0;
-    mb.cacheRead += tokens.cacheRead || 0;
-    mb.cacheWrite += tokens.cacheWrite || 0;
-    mb.reasoning += tokens.reasoning || 0;
     mb.requests += 1;
-    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
     const keyKey = m.keyAlias || '(unassigned)';
     let kb = b.byKey.get(keyKey);
     if (!kb) { kb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byKey.set(keyKey, kb); }
-    kb.input += tokens.input || 0;
-    kb.output += tokens.output || 0;
-    kb.cacheRead += tokens.cacheRead || 0;
-    kb.cacheWrite += tokens.cacheWrite || 0;
-    kb.reasoning += tokens.reasoning || 0;
     kb.requests += 1;
-    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) kb.cost += m.cost;
+    if (tokens) {
+      b.byCategory.input += tokens.input || 0;
+      b.byCategory.output += tokens.output || 0;
+      b.byCategory.cacheRead += tokens.cacheRead || 0;
+      b.byCategory.cacheWrite += tokens.cacheWrite || 0;
+      b.byCategory.reasoning += tokens.reasoning || 0;
+      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) b.cost += m.cost;
+      mb.input += tokens.input || 0;
+      mb.output += tokens.output || 0;
+      mb.cacheRead += tokens.cacheRead || 0;
+      mb.cacheWrite += tokens.cacheWrite || 0;
+      mb.reasoning += tokens.reasoning || 0;
+      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+      kb.input += tokens.input || 0;
+      kb.output += tokens.output || 0;
+      kb.cacheRead += tokens.cacheRead || 0;
+      kb.cacheWrite += tokens.cacheWrite || 0;
+      kb.reasoning += tokens.reasoning || 0;
+      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) kb.cost += m.cost;
+    }
   }
   return { buckets, tMin: firstBucket, tMax: lastBucket + bucketMs };
 }
@@ -1233,24 +1233,25 @@ function aggregateAll(entries) {
   for (const e of entries) {
     const m = e.meta || {};
     const t = m.tokens;
-    if (!t) continue;
     totals.requests += 1;
-    totals.input += t.input || 0;
-    totals.output += t.output || 0;
-    totals.cacheRead += t.cacheRead || 0;
-    totals.cacheWrite += t.cacheWrite || 0;
-    totals.reasoning += t.reasoning || 0;
-    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) totals.cost += m.cost;
     const modelKey = m.model || '(unknown)';
     let mb = byModel.get(modelKey);
     if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; byModel.set(modelKey, mb); }
-    mb.input += t.input || 0;
-    mb.output += t.output || 0;
-    mb.cacheRead += t.cacheRead || 0;
-    mb.cacheWrite += t.cacheWrite || 0;
-    mb.reasoning += t.reasoning || 0;
     mb.requests += 1;
-    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+    if (t) {
+      totals.input += t.input || 0;
+      totals.output += t.output || 0;
+      totals.cacheRead += t.cacheRead || 0;
+      totals.cacheWrite += t.cacheWrite || 0;
+      totals.reasoning += t.reasoning || 0;
+      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) totals.cost += m.cost;
+      mb.input += t.input || 0;
+      mb.output += t.output || 0;
+      mb.cacheRead += t.cacheRead || 0;
+      mb.cacheWrite += t.cacheWrite || 0;
+      mb.reasoning += t.reasoning || 0;
+      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+    }
   }
   return { totals, byModel };
 }
