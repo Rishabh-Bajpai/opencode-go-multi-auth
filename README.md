@@ -27,7 +27,7 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 ### Plugin install (recommended)
 
-Install the plugin so OpenCode starts the router automatically when it boots.
+Install the plugin so OpenCode starts the router automatically when OpenCode launches. This does not install an OS-level boot service by itself.
 
 If this package is installed from npm:
 
@@ -70,11 +70,19 @@ Add the proxy as a base URL override for the built-in `opencode-go` provider in 
 
 If you installed the plugin by copying the built file into `~/.config/opencode/plugins/`, you can leave `plugin` out entirely because local plugin files are auto-loaded.
 
-Then start OpenCode normally. The plugin will boot the proxy at `http://localhost:18905` and the dashboard at `http://localhost:18904` automatically.
+Whenever you change this repo locally, rebuild before testing or reopening OpenCode:
+
+```bash
+npm run build
+```
+
+Then fully close any existing OpenCode sessions and open a fresh one so the new plugin build is loaded.
+
+Then start OpenCode normally. The plugin will start or reuse one shared local router daemon, which serves the proxy at `http://localhost:18905` and the dashboard at `http://localhost:18904`.
 
 ### Open the Dashboard
 
-Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser.
+Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser. If the page does not open, first open a fresh OpenCode session so the plugin can start the router daemon.
 
 ### Add your Go API keys
 
@@ -98,7 +106,7 @@ npm install -g .
 opencode-go-router
 ```
 
-In standalone mode you must start the router yourself after reboot. Plugin mode avoids this.
+In standalone mode you must start the router yourself after reboot. Plugin mode avoids manual startup when opening OpenCode, but it is not an OS boot service.
 
 ## Routing Strategies
 
@@ -182,7 +190,7 @@ Both are configurable via environment variables.
 ```
 
 1. OpenCode CLI points to the proxy at `localhost:18905`
-2. OpenCode auto-loads the plugin at startup (plugin mode) and the plugin boots the proxy/dashboard in-process
+2. OpenCode auto-loads the plugin at startup (plugin mode) and the plugin starts or reuses a shared detached local router daemon
 3. Proxy selects an API key using the active strategy (with session stickiness as a pre-filter)
 4. Request is forwarded to the upstream OpenCode Go API
 5. On 402/429: key goes on dynamic cooldown, next key is tried
@@ -216,6 +224,53 @@ npm start
 | Circuit breaker tripped | High | 3 consecutive 5xx errors, key removed from pool |
 | Proactive quota switch | Low | Key usage crosses the proactive switch threshold |
 
+## OS Boot Service
+
+If you want the router to start when the machine boots, run the standalone router under your OS service manager. Plugin mode alone only starts the router when OpenCode launches.
+
+### Linux (`systemd`)
+
+1. Build the project once:
+
+```bash
+cd /absolute/path/to/opencode-go-multi-auth
+npm install
+npm run build
+```
+
+2. Create `~/.config/systemd/user/opencode-go-router.service`:
+
+```ini
+[Unit]
+Description=OpenCode Go Multi-Account Router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/absolute/path/to/opencode-go-multi-auth
+ExecStart=/usr/bin/node /absolute/path/to/opencode-go-multi-auth/dist/bin.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
+```
+
+3. Enable and start it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode-go-router.service
+```
+
+4. Point OpenCode at the same proxy config from the earlier README section. With this setup, OpenCode can reuse the already-running router after login.
+
+### macOS (`launchd`)
+
+Use the standalone router with a user `LaunchAgent` that runs `node /absolute/path/to/opencode-go-multi-auth/dist/bin.js` in the repo directory. The important part is the same: build first, then manage `dist/bin.js` as a long-running user service.
+
 ## Development
 
 ```bash
@@ -235,8 +290,9 @@ npm run clean
 ## Plugin Notes
 
 - OpenCode plugin mode is the preferred installation path.
-- The plugin starts the router once per OpenCode process and reuses an existing router if the configured ports are already occupied.
+- The plugin starts or reuses one shared local router daemon across OpenCode sessions, so opening multiple sessions should not create competing proxy/dashboard owners.
 - The plugin does not replace the built-in `opencode-go` provider. It auto-starts the proxy; the provider still needs the one-time `baseURL` override in `opencode.json`.
+- Plugin mode auto-starts the router when OpenCode launches. It does not create an OS boot service; if you want system boot behavior, run the standalone router under `systemd`, `launchd`, or another service manager.
 - Standalone CLI mode remains available for debugging, system service setups, or running the router outside OpenCode.
 
 ## Programmatic Usage

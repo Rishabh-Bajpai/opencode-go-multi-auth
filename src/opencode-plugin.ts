@@ -1,33 +1,47 @@
+import fs from 'node:fs'
 import net from 'node:net'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
 import type { Plugin, PluginModule } from '@opencode-ai/plugin'
-import { createRouter, type RouterInstance } from './router/index.js'
 import { DEFAULT_CONFIG } from './router/types.js'
 import { setPluginMode, logToFile } from './logging/logger.js'
+import { getRuntimePaths, isProcessAlive, readPidState } from './runtime/daemon.js'
 
-let routerInstance: RouterInstance | null = null
-let healthCheckTimer: ReturnType<typeof setInterval> | null = null
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 function getProxyPort(): number {
   return Number(process.env.PROXY_PORT) || DEFAULT_CONFIG.proxyPort
 }
 
-/**
- * Two-phase health check:
- * 1. TCP probe — is anything listening on the port? (fast, catches "port free" case)
- * 2. HTTP liveness — is the server actually responding? (catches stopped/zombie processes)
- *
- * A stopped process (Ctrl+Z, SIGTSTP) can hold ports open but won't respond to HTTP.
- * The TCP probe alone would report it as "alive" — the HTTP check catches this.
- */
-async function isProxyAlive(): Promise<boolean> {
-  // Phase 1: TCP port probe
-  const tcpAlive = await new Promise<boolean>((resolve) => {
+function getDashboardPort(): number {
+  return Number(process.env.DASHBOARD_PORT) || DEFAULT_CONFIG.dashboardPort
+}
+
+function getHealthUrl(): string {
+  return `http://127.0.0.1:${getDashboardPort()}/healthz`
+}
+
+async function isDashboardHealthy(): Promise<boolean> {
+  try {
+    const res = await fetch(getHealthUrl(), {
+      method: 'GET',
+      signal: AbortSignal.timeout(1500),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+async function isProxyListening(): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
     const socket = new net.Socket()
-    let resolved = false
+    let settled = false
 
     const done = (result: boolean) => {
-      if (resolved) return
-      resolved = true
+      if (settled) return
+      settled = true
       socket.destroy()
       resolve(result)
     }
@@ -38,132 +52,185 @@ async function isProxyAlive(): Promise<boolean> {
     socket.once('error', () => done(false))
     socket.connect(getProxyPort(), '127.0.0.1')
   })
+}
 
-  if (!tcpAlive) return false
+async function isRouterHealthy(): Promise<boolean> {
+  const [dashboardHealthy, proxyListening] = await Promise.all([
+    isDashboardHealthy(),
+    isProxyListening(),
+  ])
+  return dashboardHealthy && proxyListening
+}
 
-  // Phase 2: HTTP liveness — confirm server is actually processing requests
+function removeBootstrapLock(): void {
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
-
-    // Use HEAD to /v1 — minimal overhead, any HTTP response = alive
-    const res = await fetch(`http://127.0.0.1:${getProxyPort()}/v1`, {
-      method: 'HEAD',
-      signal: controller.signal,
+    const { bootstrapLockFile } = getRuntimePaths()
+    if (fs.existsSync(bootstrapLockFile)) {
+      fs.unlinkSync(bootstrapLockFile)
+    }
+  } catch (error) {
+    logToFile('warn', 'Failed to remove bootstrap lock file.', {
+      error: error instanceof Error ? error.message : String(error),
     })
-    clearTimeout(timeout)
-    return true // Any response (even 4xx/5xx) means server is processing
+  }
+}
+
+function readBootstrapLogTail(): string | null {
+  try {
+    const { bootstrapLogFile } = getRuntimePaths()
+    if (!fs.existsSync(bootstrapLogFile)) return null
+    const content = fs.readFileSync(bootstrapLogFile, 'utf8')
+    if (!content) return null
+    const lines = content.trim().split('\n')
+    return lines.slice(-10).join('\n')
   } catch {
-    // Timeout or connection error — server is not responding
+    return null
+  }
+}
+
+async function waitForRouterHealthy(timeoutMs: number, daemonPid?: number): Promise<{ healthy: boolean, childExited: boolean }> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await isRouterHealthy()) return { healthy: true, childExited: false }
+    if (daemonPid && !isProcessAlive(daemonPid)) return { healthy: false, childExited: true }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return { healthy: false, childExited: daemonPid ? !isProcessAlive(daemonPid) : false }
+}
+
+function getDaemonEntry(): string {
+  if (path.basename(__dirname) === 'src') {
+    return path.join(__dirname, 'bin.ts')
+  }
+  return path.join(__dirname, 'bin.js')
+}
+
+function spawnRouterDaemon(): number {
+  const { bootstrapLogFile } = getRuntimePaths()
+  const logFd = fs.openSync(bootstrapLogFile, 'a')
+  const child = spawn(process.execPath, [getDaemonEntry()], {
+    cwd: path.join(__dirname, '..'),
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env: {
+      ...process.env,
+      OPENCODE_ROUTER_PLUGIN_MODE: '1',
+    },
+  })
+  fs.closeSync(logFd)
+  child.unref()
+  return child.pid ?? 0
+}
+
+function tryAcquireBootstrapLock(): boolean {
+  const { bootstrapLockFile } = getRuntimePaths()
+  try {
+    const fd = fs.openSync(bootstrapLockFile, 'wx')
+    fs.writeFileSync(fd, String(process.pid))
+    fs.closeSync(fd)
+    return true
+  } catch {
     return false
   }
 }
 
-async function tryStartRouter(): Promise<RouterInstance | null> {
-  try {
-    const router = await createRouter(undefined, { suppressSetupInstructions: true })
-    routerInstance = router
-    return router
-  } catch (error) {
-    const code = typeof error === 'object' && error && 'code' in error
-      ? String((error as { code?: unknown }).code)
-      : ''
-    if (code === 'EADDRINUSE') {
-      return null
-    }
-    throw error
+async function ensureRouterDaemon(): Promise<'reused' | 'started' | 'failed'> {
+  if (await isRouterHealthy()) {
+    const state = readPidState()
+    logToFile('info', 'Reusing running router daemon.', {
+      pid: state?.pid ?? null,
+      dashboardPort: getDashboardPort(),
+      proxyPort: getProxyPort(),
+    })
+    return 'reused'
   }
-}
 
-function startHealthMonitor(): void {
-  if (healthCheckTimer) return
-
-  healthCheckTimer = setInterval(async () => {
-    const alive = await isProxyAlive()
-    if (!alive) {
-      logToFile('warn', 'Proxy health check failed (port unresponsive or process stopped), attempting takeover...')
-      stopHealthMonitor()
-      try {
-        const router = await tryStartRouter()
-        if (router) {
-          routerInstance = router
-          logToFile('info', 'Successfully took over as primary router instance.')
-        } else {
-          // Another instance beat us — resume monitoring
-          logToFile('info', 'Another instance claimed the port, resuming health monitor.')
-          startHealthMonitor()
-        }
-      } catch (err) {
-        logToFile('error', `Failed to start router: ${err instanceof Error ? err.message : String(err)}`)
-        setTimeout(() => startHealthMonitor(), 10_000)
-      }
+  const existingState = readPidState()
+  if (existingState && !isProcessAlive(existingState.pid)) {
+    logToFile('warn', 'Removing stale router pid file before restart.', { pid: existingState.pid })
+    const { pidFile } = getRuntimePaths()
+    try {
+      if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile)
+    } catch {
+      // Best-effort cleanup only.
     }
-  }, 5000)
-}
+  }
 
-function stopHealthMonitor(): void {
-  if (healthCheckTimer) {
-    clearInterval(healthCheckTimer)
-    healthCheckTimer = null
+  if (!tryAcquireBootstrapLock()) {
+    const waited = await waitForRouterHealthy(10_000)
+    if (waited.healthy) {
+      const state = readPidState()
+      logToFile('info', 'Router daemon became healthy while waiting for another bootstrapper.', {
+        pid: state?.pid ?? null,
+      })
+      return 'reused'
+    }
+
+    logToFile('error', 'Router bootstrap lock was held but the daemon never became healthy.', {
+      healthUrl: getHealthUrl(),
+      proxyPort: getProxyPort(),
+      bootstrapLogTail: readBootstrapLogTail(),
+    })
+    return 'failed'
+  }
+
+  try {
+    if (await isRouterHealthy()) {
+      return 'reused'
+    }
+
+    const pid = spawnRouterDaemon()
+    logToFile('info', 'Started router daemon bootstrap.', {
+      pid,
+      dashboardPort: getDashboardPort(),
+      proxyPort: getProxyPort(),
+      healthUrl: getHealthUrl(),
+    })
+
+    const waited = await waitForRouterHealthy(10_000, pid)
+    if (!waited.healthy) {
+      logToFile('error', waited.childExited
+        ? 'Router daemon exited before becoming healthy.'
+        : 'Router daemon failed to become healthy before timeout.', {
+        pid,
+        healthUrl: getHealthUrl(),
+        proxyPort: getProxyPort(),
+        bootstrapLogTail: readBootstrapLogTail(),
+      })
+      return 'failed'
+    }
+
+    const state = readPidState()
+    logToFile('info', 'Router daemon is healthy and ready.', {
+      pid: state?.pid ?? pid,
+      dashboardPort: getDashboardPort(),
+      proxyPort: getProxyPort(),
+    })
+    return 'started'
+  } finally {
+    removeBootstrapLock()
   }
 }
 
 const OpenCodeGoMultiAuthPlugin: Plugin = async ({ client }) => {
-  // Enable plugin mode — suppress all console output, log to file only
   setPluginMode(true)
+  const status = await ensureRouterDaemon()
 
-  const router = await tryStartRouter()
-
-  if (router) {
-    routerInstance = router
-    logToFile('info', 'Router plugin initialized — primary instance, servers started.', {
-      proxyPort: getProxyPort(),
-      dashboardPort: DEFAULT_CONFIG.dashboardPort,
-    })
-  } else {
-    // Check if the existing proxy is actually healthy
-    const alive = await isProxyAlive()
-    if (alive) {
-      logToFile('info', 'Router plugin initialized — secondary instance, existing proxy is healthy.', {
-        proxyPort: getProxyPort(),
-      })
-      startHealthMonitor()
-    } else {
-      // Port is held by a dead/stopped process — wait for OS to release it, then try again
-      logToFile('warn', 'Port bound but proxy unresponsive (possibly a stopped process). Waiting for port release...')
-      const retryDelay = 3000
-      await new Promise((resolve) => setTimeout(resolve, retryDelay))
-
-      const retryRouter = await tryStartRouter()
-      if (retryRouter) {
-        routerInstance = retryRouter
-        logToFile('info', 'Router started after port was released.')
-      } else {
-        logToFile('info', 'Port still held, starting health monitor to wait for release.')
-        startHealthMonitor()
-      }
-    }
-  }
-
-  // Log to OpenCode's structured logger
   await client.app.log({
     body: {
       service: 'opencode-go-multi-auth',
-      level: 'info',
-      message: routerInstance
-        ? 'Multi-auth router started.'
-        : 'Multi-auth router connected (secondary).',
+      level: status === 'failed' ? 'error' : 'info',
+      message: status === 'started'
+        ? 'Multi-auth router daemon started.'
+        : status === 'reused'
+          ? 'Multi-auth router daemon reused.'
+          : 'Multi-auth router daemon failed to start.',
     },
   }).catch(() => {})
 
   return {
     dispose: async () => {
-      stopHealthMonitor()
-      if (routerInstance) {
-        logToFile('info', 'Shutting down router servers.')
-        await routerInstance.shutdown()
-        routerInstance = null
-      }
+      // Shared daemon stays alive across OpenCode session exits.
     },
   }
 }

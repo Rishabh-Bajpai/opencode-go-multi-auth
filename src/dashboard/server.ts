@@ -41,6 +41,14 @@ export class DashboardServer {
   private setupRoutes(): void {
     this.app.use(express.static(PUBLIC_DIR))
 
+    this.app.get('/healthz', (_req, res) => {
+      res.json({
+        ok: true,
+        keys: this.keyManager.getKeys().length,
+        activeKeys: this.keyManager.getActiveKeys().length,
+      })
+    })
+
     this.app.get('/api/keys', async (_req, res) => {
       res.json(this.serializeKeys())
     })

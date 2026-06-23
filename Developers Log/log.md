@@ -317,3 +317,36 @@ Now when ports are taken, the Promise rejects with `EADDRINUSE`, which is caught
 **Files changed:** `logger.ts`, `opencode-plugin.ts`, `router/index.ts`, `proxy/header-passthrough.ts`, `notification/ntfy.ts`
 
 - Committed: `fix: use TCP port probe for health checks, route all logs to file when running as plugin`
+
+### Follow-up 2: Stopped/Zombie Processes Holding Ports
+
+**Problem:**
+If an opencode instance is suspended (e.g., via `Ctrl+Z` / `SIGTSTP`), it goes into a stopped state (`Tl` in `ps`). It still holds the ports (18904, 18905) open, so a TCP probe succeeds ("port is alive"), but because the process is stopped, it never responds to HTTP requests. This caused secondary instances to indefinitely trust a dead proxy, and requests to hang forever.
+
+**Fix:**
+Implemented a **Two-Phase Health Check** in `opencode-plugin.ts`:
+1. **TCP Probe:** Fast check. If the port isn't even bound, fail immediately.
+2. **HTTP Liveness:** If TCP succeeds, send an `HTTP HEAD /v1` request with an `AbortController` timeout (3 seconds). If the server doesn't respond because it's stopped/frozen, this catches it and reports "unresponsive".
+
+Now, if a secondary instance sees a port is bound but unresponsive, it waits briefly for the OS to release it, and if it's still held, it knows it's dealing with a zombie and will take over.
+
+- Committed: `fix: implement two-phase health check to detect stopped processes`
+
+### Follow-up 3: Shared Daemon Startup Model
+
+**Problem:**
+The plugin still hosted the proxy/dashboard inside each OpenCode process. Even with port contention handling, multiple sessions could still fight over ownership, leave frozen health-monitor loops behind, or kill the router when one session exited.
+
+**Fix:**
+Changed the plugin to a shared-daemon model.
+- Added `src/runtime/daemon.ts` for shared runtime files (`router.pid`, bootstrap lock, bootstrap log).
+- Reworked `src/opencode-plugin.ts` so the plugin starts or reuses one detached router daemon instead of starting the servers in-process.
+- Added `/healthz` in `src/dashboard/server.ts` so plugin startup can verify readiness explicitly.
+- Updated `src/bin.ts` to write/remove the pid file and log daemon lifecycle events.
+- Added bootstrap log capture for detached daemon launches to make startup failures diagnosable.
+
+**Result:**
+- Existing OpenCode session works.
+- Fresh OpenCode session works.
+- Dashboard loads at `http://localhost:18904`.
+- Multi-session OpenCode usage no longer depends on per-session port ownership.
