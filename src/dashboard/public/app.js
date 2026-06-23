@@ -516,14 +516,47 @@ function lineChartSvg(series, opts) {
   const vMax = Math.max(1, ...all.map((p) => p.v));
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
-  const x = (t) => padding.left + ((t - tMin) / Math.max(1, tMax - tMin)) * innerW;
+  const spanMs = Math.max(1, tMax - tMin);
+  const x = (t) => padding.left + ((t - tMin) / spanMs) * innerW;
   const y = (v) => padding.top + innerH - (v / vMax) * innerH;
 
-  const grid = [];
+  // Horizontal grid lines (y-axis)
+  const hGrid = [];
   for (let i = 0; i <= 4; i++) {
     const yy = padding.top + (innerH / 4) * i;
-    grid.push(`<line x1="${padding.left}" y1="${yy}" x2="${width - padding.right}" y2="${yy}"/>`);
+    hGrid.push(`<line x1="${padding.left}" y1="${yy}" x2="${width - padding.right}" y2="${yy}"/>`);
   }
+
+  // Compute tick interval for x-axis based on time span
+  let tickIntervalMs;
+  if (spanMs <= 120_000) tickIntervalMs = 10_000;
+  else if (spanMs <= 300_000) tickIntervalMs = 30_000;
+  else if (spanMs <= 600_000) tickIntervalMs = 60_000;
+  else if (spanMs <= 1_800_000) tickIntervalMs = 300_000;
+  else tickIntervalMs = 600_000;
+
+  const ticks = [];
+  if (tickIntervalMs > 0) {
+    const firstTick = Math.ceil(tMin / tickIntervalMs) * tickIntervalMs;
+    for (let t = firstTick; t <= tMax; t += tickIntervalMs) {
+      ticks.push(t);
+    }
+  }
+
+  // Label spacing to avoid overlap
+  const labelMinPx = 60;
+  const maxLabels = Math.max(1, Math.floor(innerW / labelMinPx));
+  const labelStep = Math.max(1, Math.ceil(ticks.length / maxLabels));
+
+  const vGridAndLabels = ticks.map((t, i) => {
+    const xx = x(t).toFixed(1);
+    const showLabel = i % labelStep === 0 || i === ticks.length - 1;
+    const fmt = (ts) => new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    return `
+      <line x1="${xx}" y1="${padding.top}" x2="${xx}" y2="${padding.top + innerH}" class="grid-v"/>
+      ${showLabel ? `<text x="${xx}" y="${height - 6}" text-anchor="middle" font-size="9">${fmt(t)}</text>` : ''}
+    `;
+  }).join('');
 
   const path = (pts) => {
     if (pts.length === 0) return '';
@@ -537,13 +570,11 @@ function lineChartSvg(series, opts) {
     return start + ' ' + line + ' ' + end;
   };
 
-  const fmt = (t) => new Date(t).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
   return `
-    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-      <g class="grid">${grid.join('')}</g>
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+      <g class="grid">${hGrid.join('')}</g>
+      <g class="grid-v">${vGridAndLabels}</g>
       <g class="axis">
-        <text x="${padding.left}" y="${height - 6}">${fmt(tMin)}</text>
-        <text x="${width - padding.right}" y="${height - 6}" text-anchor="end">${fmt(tMax)}</text>
         <text x="4" y="${padding.top + 8}">${fmtTokens(vMax)}</text>
         <text x="4" y="${padding.top + innerH}">0</text>
       </g>
@@ -1092,11 +1123,11 @@ function initSearch() {
 // ---------------------------------------------------------------------------
 
 const TOKENS_WINDOWS = {
-  3600000: { bucketMs: 60_000, label: 'Last 1h', fmtTick: 'time' },
-  21600000: { bucketMs: 5 * 60_000, label: 'Last 6h', fmtTick: 'time' },
-  86400000: { bucketMs: 15 * 60_000, label: 'Last 24h', fmtTick: 'datetime' },
-  604800000: { bucketMs: 60 * 60_000, label: 'Last 7d', fmtTick: 'datetime' },
-  2592000000: { bucketMs: 6 * 60 * 60_000, label: 'Last 30d', fmtTick: 'date' },
+  3600000: { bucketMs: 60_000, label: 'Last 1h', fmtTick: 'time', tickIntervalMs: 300_000 },
+  21600000: { bucketMs: 5 * 60_000, label: 'Last 6h', fmtTick: 'time', tickIntervalMs: 1_800_000 },
+  86400000: { bucketMs: 15 * 60_000, label: 'Last 24h', fmtTick: 'datetime', tickIntervalMs: 3_600_000 },
+  604800000: { bucketMs: 60 * 60_000, label: 'Last 7d', fmtTick: 'datetime', tickIntervalMs: 43_200_000 },
+  2592000000: { bucketMs: 6 * 60 * 60_000, label: 'Last 30d', fmtTick: 'date', tickIntervalMs: 86_400_000 },
 };
 
 const TOKENS_CATEGORIES = [
@@ -1126,17 +1157,21 @@ function getTokenLogsInWindow(windowMs, now = Date.now()) {
   return out;
 }
 
-function bucketize(entries, bucketMs) {
-  if (!entries.length) return { buckets: [], tMin: 0, tMax: 0 };
-  let tMin = Infinity;
-  let tMax = -Infinity;
-  for (const e of entries) {
-    const ts = new Date(e.timestamp).getTime();
-    if (ts < tMin) tMin = ts;
-    if (ts > tMax) tMax = ts;
+function bucketize(entries, bucketMs, rangeStart, rangeEnd) {
+  const hasRange = rangeStart !== undefined && rangeEnd !== undefined;
+  if (!entries.length && !hasRange) return { buckets: [], tMin: 0, tMax: 0 };
+  let tMin = rangeStart ?? Infinity;
+  let tMax = rangeEnd ?? -Infinity;
+  if (!hasRange) {
+    for (const e of entries) {
+      const ts = new Date(e.timestamp).getTime();
+      if (ts < tMin) tMin = ts;
+      if (ts > tMax) tMax = ts;
+    }
+    if (!Number.isFinite(tMin)) return { buckets: [], tMin: 0, tMax: 0 };
   }
   const firstBucket = Math.floor(tMin / bucketMs) * bucketMs;
-  const lastBucket = Math.floor(tMax / bucketMs) * bucketMs;
+  const lastBucket = Math.floor((tMax - 1) / bucketMs) * bucketMs;
   const numBuckets = Math.max(1, Math.floor((lastBucket - firstBucket) / bucketMs) + 1);
   const buckets = [];
   for (let i = 0; i < numBuckets; i++) {
@@ -1236,7 +1271,7 @@ function renderTokensKpis(totals) {
   `).join('');
 }
 
-function renderTokensSharedChart(buckets) {
+function renderTokensSharedChart(buckets, config) {
   const host = $('#tokens-shared-chart');
   if (!host) return;
   if (!buckets.length) {
@@ -1254,15 +1289,15 @@ function renderTokensSharedChart(buckets) {
     </div>`;
     return;
   }
-  host.innerHTML = stackedAreaChartSvg(buckets, { width: 1080, height: 240, padding: { top: 12, right: 12, bottom: 28, left: 50 } });
+  host.innerHTML = stackedAreaChartSvg(buckets, { width: 1080, height: 240, padding: { top: 12, right: 12, bottom: 28, left: 50 }, bucketMs: config.bucketMs, tickIntervalMs: config.tickIntervalMs });
 }
 
 function stackedAreaChartSvg(buckets, opts) {
-  const { width, height, padding } = opts;
+  const { width, height, padding, bucketMs, tickIntervalMs } = opts;
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
   const tMin = buckets[0].t;
-  const tMax = buckets[buckets.length - 1].t + 1;
+  const tMax = buckets[buckets.length - 1].t + (bucketMs || 1);
   const span = Math.max(1, tMax - tMin);
   const x = (t) => padding.left + ((t - tMin) / span) * innerW;
 
@@ -1275,11 +1310,48 @@ function stackedAreaChartSvg(buckets, opts) {
   const yMax = Math.max(1, ...stackTop);
   const y = (v) => padding.top + innerH - (v / yMax) * innerH;
 
-  const grid = [];
+  // Horizontal grid lines (y-axis)
+  const hGrid = [];
   for (let i = 0; i <= 4; i++) {
     const yy = padding.top + (innerH / 4) * i;
-    grid.push(`<line x1="${padding.left}" y1="${yy}" x2="${width - padding.right}" y2="${yy}"/>`);
+    hGrid.push(`<line x1="${padding.left}" y1="${yy}" x2="${width - padding.right}" y2="${yy}"/>`);
   }
+
+  // X-axis ticks
+  const ticks = [];
+  if (tickIntervalMs && tickIntervalMs > 0) {
+    const firstTick = Math.ceil(tMin / tickIntervalMs) * tickIntervalMs;
+    for (let t = firstTick; t <= tMax; t += tickIntervalMs) {
+      ticks.push(t);
+    }
+  }
+
+  // Tick formatter
+  const tickFmt = (t) => {
+    const d = new Date(t);
+    if (TOKENS_WINDOWS[tokensState.windowMs]?.fmtTick === 'date') {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    if (TOKENS_WINDOWS[tokensState.windowMs]?.fmtTick === 'datetime') {
+      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+
+  // Determine label spacing to avoid overlap
+  const labelMinPx = 80;
+  const maxLabels = Math.max(1, Math.floor(innerW / labelMinPx));
+  const labelStep = Math.max(1, Math.ceil(ticks.length / maxLabels));
+
+  // Vertical grid lines + x-axis labels
+  const vGridAndLabels = ticks.map((t, i) => {
+    const xx = x(t).toFixed(1);
+    const showLabel = i % labelStep === 0 || i === ticks.length - 1;
+    return `
+      <line x1="${xx}" y1="${padding.top}" x2="${xx}" y2="${padding.top + innerH}" class="grid-v"/>
+      ${showLabel ? `<text x="${xx}" y="${height - 8}" text-anchor="middle" font-size="10">${escapeHtml(tickFmt(t))}</text>` : ''}
+    `;
+  }).join('');
 
   // Build stacked areas. For each category, draw a path from the bottom of
   // that category to the top, then back along the top of the previous one.
@@ -1311,23 +1383,11 @@ function stackedAreaChartSvg(buckets, opts) {
     areaPaths.push(`<path d="${path}" fill="${cat.color}" fill-opacity="0.55" stroke="${cat.color}" stroke-opacity="0.5" stroke-width="0.5"/>`);
   }
 
-  const tickFmt = (t) => {
-    const d = new Date(t);
-    if (TOKENS_WINDOWS[tokensState.windowMs]?.fmtTick === 'date') {
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-    if (TOKENS_WINDOWS[tokensState.windowMs]?.fmtTick === 'datetime') {
-      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  };
-
   return `
-    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-      <g class="grid">${grid.join('')}</g>
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+      <g class="grid">${hGrid.join('')}</g>
+      <g class="grid-v">${vGridAndLabels}</g>
       <g class="axis">
-        <text x="${padding.left}" y="${height - 8}">${tickFmt(tMin)}</text>
-        <text x="${width - padding.right}" y="${height - 8}" text-anchor="end">${tickFmt(tMax)}</text>
         <text x="4" y="${padding.top + 8}">${fmtTokens(yMax)}</text>
         <text x="4" y="${padding.top + innerH}">0</text>
       </g>
@@ -1434,19 +1494,41 @@ function renderTokensModelSeries(buckets) {
 
 function miniStackedAreaSvg(series, buckets) {
   if (!buckets.length) {
-    return `<svg class="tokens-mini-svg" viewBox="0 0 360 100" preserveAspectRatio="none"></svg>`;
+    return `<svg class="tokens-mini-svg" viewBox="0 0 360 100" preserveAspectRatio="xMidYMid meet"></svg>`;
   }
-  const width = 360, height = 100, padTop = 4, padBottom = 4, padX = 2;
+  const width = 360, height = 100, padTop = 4, padBottom = 20, padX = 2;
   const innerW = width - padX * 2;
   const innerH = height - padTop - padBottom;
   const tMin = buckets[0].t;
-  const tMax = buckets[buckets.length - 1].t + 1;
+  const bucketMs = buckets.length > 1 ? buckets[1].t - buckets[0].t : 1;
+  const tMax = buckets[buckets.length - 1].t + bucketMs;
   const span = Math.max(1, tMax - tMin);
   const x = (t) => padX + ((t - tMin) / span) * innerW;
   // Per-bucket stack top
-  const stackTops = buckets.map((b) => series.reduce((s, s2) => s + (s2.points[buckets.indexOf(b)]?.v || 0), 0));
+  const stackTops = buckets.map((b, i) => series.reduce((s, s2) => s + (s2.points[i]?.v || 0), 0));
   const yMax = Math.max(1, ...stackTops);
   const y = (v) => padTop + innerH - (v / yMax) * innerH;
+
+  // Generate x-axis ticks (about 6 evenly spaced)
+  const tickIntervalMini = Math.max(1, Math.floor(bucketMs * Math.max(1, Math.ceil(buckets.length / 6))));
+  const miniTicks = [];
+  {
+    const firstTick = Math.ceil(tMin / tickIntervalMini) * tickIntervalMini;
+    for (let t = firstTick; t <= tMax; t += tickIntervalMini) {
+      miniTicks.push(t);
+    }
+  }
+  const miniLabelStep = Math.max(1, Math.ceil(miniTicks.length / 6));
+  const miniTickMarkup = miniTicks.map((t, i) => {
+    const xx = x(t).toFixed(1);
+    const showLabel = i % miniLabelStep === 0 || i === miniTicks.length - 1;
+    const d = new Date(t);
+    const label = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `
+      <line x1="${xx}" y1="${padTop + innerH}" x2="${xx}" y2="${padTop + innerH + 4}" stroke="var(--border)"/>
+      ${showLabel ? `<text x="${xx}" y="${height - 6}" text-anchor="middle" font-size="8" fill="var(--text-faint)">${escapeHtml(label)}</text>` : ''}
+    `;
+  }).join('');
 
   // Build cumulative
   const cumUpper = series.map(() => new Array(buckets.length).fill(0));
@@ -1473,7 +1555,7 @@ function miniStackedAreaSvg(series, buckets) {
     }
     return `<path d="${parts.join(' ')} Z" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-opacity="0.4" stroke-width="0.5"/>`;
   }).join('');
-  return `<svg class="tokens-mini-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${paths}</svg>`;
+  return `<svg class="tokens-mini-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">${miniTickMarkup}${paths}</svg>`;
 }
 
 function renderTokensKeySeries(buckets) {
@@ -1523,9 +1605,11 @@ function renderTokensKeySeries(buckets) {
 function renderTokens() {
   const windowMs = tokensState.windowMs;
   const config = TOKENS_WINDOWS[windowMs] || TOKENS_WINDOWS[86400000];
-  const entries = getTokenLogsInWindow(windowMs);
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const entries = getTokenLogsInWindow(windowMs, now);
   const { totals, byModel } = aggregateAll(entries);
-  const { buckets } = bucketize(entries, config.bucketMs);
+  const { buckets } = bucketize(entries, config.bucketMs, cutoff, now);
 
   const label = config.label;
   $('#tokens-shared-meta').textContent = `${label} · stacked area by category · bucket ${formatBucket(config.bucketMs)}`;
@@ -1534,7 +1618,7 @@ function renderTokens() {
   $('#tokens-data-note').textContent = `Showing ${fmtNumber(entries.length)} log entr${entries.length === 1 ? 'y' : 'ies'} from the live buffer (500 recent + 10,000 archived). Anything older than the buffer is not shown.`;
 
   renderTokensKpis(totals);
-  renderTokensSharedChart(buckets);
+  renderTokensSharedChart(buckets, config);
   renderTokensModelsTable(byModel);
   renderTokensModelSeries(buckets);
   renderTokensKeySeries(buckets);

@@ -565,6 +565,7 @@ input, select, textarea {
   font-size: 10px;
 }
 .chart-svg .grid line { stroke: var(--border); stroke-dasharray: 2 4; }
+.chart-svg .grid-v line { stroke: var(--border); stroke-dasharray: 2 4; }
 .chart-svg .axis text { fill: var(--text-faint); }
 .chart-svg .axis-y text { fill: var(--text-faint); }
 .chart-svg .series { fill: none; stroke-width: 1.5; }
