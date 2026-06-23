@@ -3,146 +3,251 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenCode Go Router Control Room</title>
+  <title>OpenCode Go Router — Control Room</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="shell">
-    <div class="ambient ambient-a"></div>
-    <div class="ambient ambient-b"></div>
-
-    <header class="hero card">
-      <div class="hero-copy">
-        <p class="eyebrow">OpenCode Go Router</p>
-        <h1>Control Room</h1>
-        <p class="hero-text">
-          A cache-aware multi-account switchboard for OpenCode Go. Keep one account warm when you want cache reuse,
-          spill into the next account when needed, and see exactly why every key is being selected.
-        </p>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="brand">
+          <div class="brand-mark">G</div>
+          <span class="brand-name">OpenCode Go Router</span>
+        </div>
+        <span class="brand-divider"></span>
+        <span class="brand-section">Control Room</span>
       </div>
-
-      <div class="hero-side">
-        <div class="status-pill" id="status-badge">Disconnected</div>
-        <div class="hero-metrics" id="summary-grid"></div>
+      <div class="topbar-right">
+        <span class="status-pill" id="status-badge">
+          <span class="dot"></span>
+          <span class="status-text">Disconnected</span>
+        </span>
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel panel-keys card">
-        <div class="panel-header">
+    <aside class="sidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-label">Workspace</div>
+        <button class="nav-item active" data-page="overview">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          <span>Overview</span>
+        </button>
+        <button class="nav-item" data-page="accounts">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          <span>Accounts</span>
+          <span class="nav-badge" id="nav-keys-count">0</span>
+        </button>
+        <button class="nav-item" data-page="routing">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/></svg>
+          <span>Routing</span>
+        </button>
+        <button class="nav-item" data-page="logs">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Logs</span>
+        </button>
+        <button class="nav-item" data-page="settings">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+      </div>
+
+      <div class="sidebar-footer">
+        <span>Dashboard <strong id="footer-dashboard">:18904</strong></span>
+        <span>Proxy <strong id="footer-proxy">:18905</strong></span>
+        <span>Strategy <strong id="footer-strategy">—</strong></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- OVERVIEW -->
+      <section class="page active" data-page="overview">
+        <div class="page-header">
           <div>
-            <p class="panel-kicker">Accounts</p>
-            <h2>Key Deck</h2>
+            <h1 class="page-title">Overview</h1>
+            <p class="page-subtitle">Live activity across your routed OpenCode Go accounts.</p>
           </div>
-          <button class="btn btn-primary" id="add-key-btn">Add Key</button>
         </div>
-        <p class="panel-note">
-          Enable or drain accounts, set their priority for cache-first routing, and change how much traffic weighted strategies should send to each key.
-        </p>
-        <div class="key-grid" id="key-list"></div>
+
+        <div class="kpi-grid" id="overview-kpis"></div>
+
+        <div class="split">
+          <div class="card">
+            <div class="card-head">
+              <h3>Reconciliation</h3>
+              <span class="panel-meta" id="recon-meta">Router observed vs OpenCode recorded</span>
+            </div>
+            <div id="recon-body"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h3>Token throughput</h3>
+              <span class="panel-meta" id="chart-meta">Last 1h — auto-updating</span>
+            </div>
+            <div id="overview-chart" style="padding: 12px 16px 0;"></div>
+            <div class="chart-legend">
+              <span><span class="swatch" style="background: var(--accent);"></span>Input</span>
+              <span><span class="swatch" style="background: var(--green);"></span>Output</span>
+              <span><span class="swatch" style="background: var(--purple);"></span>Cache read</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Token breakdown</h3>
+            <span class="panel-meta">Per-window share</span>
+          </div>
+          <div id="breakdown-body" class="card-body"></div>
+        </div>
       </section>
 
-      <section class="panel panel-routing card">
-        <div class="panel-header">
+      <!-- ACCOUNTS -->
+      <section class="page" data-page="accounts">
+        <div class="page-header">
           <div>
-            <p class="panel-kicker">Routing</p>
-            <h2>Strategy Console</h2>
+            <h1 class="page-title">Accounts</h1>
+            <p class="page-subtitle">Drag to reorder priority. Click an alias to rename. Click the masked key to replace it.</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-primary" id="add-key-btn">+ Add key</button>
           </div>
         </div>
-        <div class="strategy-picker">
-          <label for="strategy-select">Active strategy</label>
-          <select class="select" id="strategy-select"></select>
-        </div>
-        <div class="strategy-explainer" id="strategy-explainer"></div>
-        <div class="strategy-grid" id="strategy-grid"></div>
+        <div id="account-list" class="account-list"></div>
       </section>
 
-      <section class="panel panel-status card">
-        <div class="panel-header">
+      <!-- ROUTING -->
+      <section class="page" data-page="routing">
+        <div class="page-header">
           <div>
-            <p class="panel-kicker">Status</p>
-            <h2>Live Usage Ledger</h2>
+            <h1 class="page-title">Routing</h1>
+            <p class="page-subtitle">Choose how requests are distributed across your accounts.</p>
           </div>
         </div>
-        <p class="panel-note">
-          Usage is tracked per key from live API responses. Cache reads, writes, reasoning tokens, request counts, and cooldown state are all visible here.
-        </p>
-        <div class="ledger-grid" id="status-ledger"></div>
+
+        <div id="strategy-hero-host"></div>
+        <div id="strategy-grid-host" class="strategy-grid"></div>
       </section>
 
-      <section class="panel panel-logs card">
-        <div class="panel-header panel-header-stack">
+      <!-- LOGS -->
+      <section class="page" data-page="logs">
+        <div class="page-header">
           <div>
-            <p class="panel-kicker">Observability</p>
-            <h2>Routing Tape</h2>
+            <h1 class="page-title">Logs</h1>
+            <p class="page-subtitle">Every routed request. Search, filter, click to expand.</p>
           </div>
-          <div class="log-controls">
-            <input type="text" class="input log-filter" id="filter-path" placeholder="Path">
-            <input type="text" class="input log-filter" id="filter-status" placeholder="Status">
-            <select class="select log-filter-select" id="filter-key">
-              <option value="">All Keys</option>
-            </select>
-            <select class="select log-filter-select" id="filter-level">
-              <option value="">All Levels</option>
-              <option value="info">Info</option>
-              <option value="warn">Warn</option>
-              <option value="error">Error</option>
-              <option value="debug">Debug</option>
-            </select>
-            <label class="pause-label">
-              <input type="checkbox" id="pause-logs"> Pause tape
-            </label>
-            <button class="btn btn-secondary" id="clear-logs-btn">Clear</button>
+          <div class="page-actions">
+            <button class="btn" id="logs-pause">Pause</button>
+            <button class="btn" id="logs-clear">Clear</button>
+            <button class="btn" id="logs-download">Download JSON</button>
           </div>
         </div>
-        <div class="log-head">
-          <span>Time</span>
-          <span>Level</span>
-          <span>Method</span>
-          <span>Path</span>
-          <span>Status</span>
-          <span>Key</span>
-          <span>Route reason</span>
-          <span>Tokens</span>
-          <span>Cost</span>
+
+        <div class="log-toolbar">
+          <div class="search-input">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="input" id="logs-search" placeholder="Search path, model, key, route reason…">
+          </div>
+          <div class="filter-chips" id="logs-levels">
+            <button class="filter-chip" data-level="">All</button>
+            <button class="filter-chip" data-level="info">Info</button>
+            <button class="filter-chip" data-level="warn">Warn</button>
+            <button class="filter-chip" data-level="error">Error</button>
+          </div>
         </div>
-        <div class="card-body log-viewer" id="log-viewer"></div>
+
+        <div class="log-table-wrap">
+          <div class="log-head">
+            <span>Time</span>
+            <span>Level</span>
+            <span>Method</span>
+            <span>Path</span>
+            <span>Status</span>
+            <span>Key</span>
+            <span>Model</span>
+            <span>Route reason</span>
+            <span>Tokens</span>
+            <span>Cost</span>
+          </div>
+          <div class="log-body" id="log-body">
+            <div class="log-spacer-top" id="log-spacer-top"></div>
+            <div id="log-rows"></div>
+            <div class="log-spacer-bot" id="log-spacer-bot"></div>
+          </div>
+          <div class="log-footer">
+            <span id="logs-count">0 entries</span>
+            <span id="logs-status">Live</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="page" data-page="settings">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Settings</h1>
+            <p class="page-subtitle">Runtime configuration of the router. Read-only — changes require restart.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Active configuration</h3>
+            <span class="panel-meta" id="settings-meta"></span>
+          </div>
+          <div class="config-table" id="config-table"></div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-head">
+            <h3>OpenCode integration</h3>
+          </div>
+          <div class="card-body">
+            <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 13px;">
+              Add this block to <code style="font-family: var(--font-mono);">~/.opencode/opencode.json</code> to route Go API calls through the proxy:
+            </p>
+            <textarea class="textarea" readonly id="provider-config"></textarea>
+            <div class="config-actions">
+              <button class="btn" id="copy-provider-config">Copy</button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 
   <div class="modal-overlay" id="add-key-modal">
-    <div class="modal card">
-      <div class="modal-header">
-        <div>
-          <p class="panel-kicker">New account</p>
-          <h3>Add API Key</h3>
-        </div>
-        <button class="btn-close" id="modal-close" aria-label="Close">&times;</button>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Add API key</h3>
+        <button class="btn btn-ghost btn-sm" id="modal-close">✕</button>
       </div>
       <div class="modal-body">
-        <input type="text" class="input" id="key-alias-input" placeholder="Alias">
-        <input type="password" class="input" id="key-value-input" placeholder="Paste OpenCode Go API key">
-        <div class="modal-grid">
+        <label>
+          Alias
+          <input class="input" id="key-alias-input" placeholder="e.g. work-account">
+        </label>
+        <label>
+          OpenCode Go API key
+          <input class="input input-mono" id="key-value-input" placeholder="Paste key" autocomplete="off">
+        </label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
           <label>
-            <span>Priority</span>
-            <input type="number" class="input" id="key-priority-input" min="1" value="1">
+            Priority
+            <input class="input" type="number" min="1" id="key-priority-input" value="1">
           </label>
           <label>
-            <span>Weight</span>
-            <input type="number" class="input" id="key-weight-input" min="1" value="1">
+            Weight
+            <input class="input" type="number" min="1" id="key-weight-input" value="1">
           </label>
         </div>
-        <p class="modal-note">
-          Lower priority numbers win first in cache-friendly strategies. Weight is only used by weighted cycle routing.
-        </p>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
-        <button class="btn btn-primary" id="modal-save">Add Key</button>
+      <div class="modal-foot">
+        <button class="btn" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-save">Add key</button>
       </div>
     </div>
   </div>
+
+  <div class="toast-stack" id="toast-stack"></div>
 
   <script src="/app.js"></script>
 </body>
