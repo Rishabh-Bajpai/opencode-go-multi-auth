@@ -5,6 +5,18 @@ let logBuffer = []
 let strategyInfo = []
 let activeStrategy = ''
 
+function emptyWindow() {
+  return {
+    cost: 0,
+    sessions: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   connectWebSocket()
   setupEventListeners()
@@ -88,12 +100,19 @@ async function loadStatus() {
 
 function renderSummary(summary) {
   const grid = document.getElementById('summary-grid')
+  const actual = summary.actualUsage || {}
+  const trailing7d = actual.trailing7d || emptyWindow()
+  const calendarMonth = actual.calendarMonth || emptyWindow()
+  const rolling30d = actual.rolling30d || emptyWindow()
   const items = [
     ['Enabled Keys', summary.enabledKeys ?? 0],
     ['Active Now', summary.activeKeys ?? 0],
     ['Cooldown Keys', summary.cooldownKeys ?? 0],
     ['Requests Seen', formatNumber(summary.totalRequests ?? 0)],
-    ['Total Cost', `$${Number(summary.totalCost ?? 0).toFixed(4)}`],
+    ['Router Tokens', formatNumber(summary.totalTokens ?? 0)],
+    ['OpenCode 7d', formatCurrency(trailing7d.cost)],
+    ['OpenCode Month', formatCurrency(calendarMonth.cost)],
+    ['OpenCode Rolling 30d', formatCurrency(rolling30d.cost)],
   ]
 
   grid.innerHTML = items.map(([label, value]) => `
@@ -120,8 +139,10 @@ function renderKeys(keys) {
     return
   }
 
+  const total30dTokens = keys.reduce((sum, key) => sum + Number(key.recentUsage?.last30d?.totalTokens || 0), 0)
   list.innerHTML = keys.map((key) => {
-    const quotaPercent = Math.round((key.quota?.percentUsed ?? 0) * 100)
+    const last30dTokens = Number(key.recentUsage?.last30d?.totalTokens || 0)
+    const activityPercent = total30dTokens > 0 ? Math.round((last30dTokens / total30dTokens) * 100) : 0
     return `
       <article class="key-card ${key.enabled ? '' : 'is-muted'}">
         <div class="key-card-top">
@@ -164,10 +185,10 @@ function renderKeys(keys) {
         </div>
 
         <div class="quota-strip">
-          <div class="quota-bar"><div class="quota-fill ${quotaPercent > 90 ? 'danger' : quotaPercent > 75 ? 'warning' : ''}" style="width:${Math.min(100, quotaPercent)}%"></div></div>
+          <div class="quota-bar"><div class="quota-fill" style="width:${Math.min(100, activityPercent)}%"></div></div>
           <div class="quota-copy">
-            <span>Used $${Number(key.quota?.costAccumulated ?? 0).toFixed(2)}</span>
-            <span>Remaining $${Number(key.quota?.remaining ?? 0).toFixed(2)}</span>
+            <span>Observed 30d tokens ${formatNumber(last30dTokens)}</span>
+            <span>Observed 7d requests ${formatNumber(key.recentUsage?.last7d?.requests ?? 0)}</span>
           </div>
         </div>
       </article>
@@ -200,6 +221,13 @@ function renderLedger(keys) {
           <div><span>Tokens</span><strong>${formatNumber(key.tokensUsed)}</strong></div>
           <div><span>Success / Error</span><strong>${formatNumber(key.successCount)} / ${formatNumber(key.errorCount)}</strong></div>
           <div><span>Last used</span><strong>${formatDateTime(key.lastUsedAt)}</strong></div>
+        </div>
+
+        <div class="ledger-stats">
+          <div><span>7d tokens</span><strong>${formatNumber(key.recentUsage?.last7d?.totalTokens ?? 0)}</strong></div>
+          <div><span>30d tokens</span><strong>${formatNumber(key.recentUsage?.last30d?.totalTokens ?? 0)}</strong></div>
+          <div><span>Month tokens</span><strong>${formatNumber(key.recentUsage?.calendarMonth?.totalTokens ?? 0)}</strong></div>
+          <div><span>Est. quota spend</span><strong>${formatCurrency(key.quota?.costAccumulated)}</strong></div>
         </div>
 
         <div class="token-breakdown">
@@ -332,7 +360,7 @@ function appendLog(entry) {
     <span>${entry.meta?.keyAlias || ''}</span>
     <span class="path-cell">${entry.meta?.routeReason || entry.message || ''}</span>
     <span>${tokenText}</span>
-    <span>${entry.meta?.cost != null ? `$${Number(entry.meta.cost).toFixed(6)}` : ''}</span>
+    <span>${entry.meta?.cost != null ? formatCurrency(Number(entry.meta.cost)) : ''}</span>
   `
 
   viewer.appendChild(row)
@@ -464,6 +492,10 @@ function formatCooldown(value) {
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('en-US')
+}
+
+function formatCurrency(value) {
+  return `$${Number(value || 0).toFixed(4)}`
 }
 
 function escapeHtml(value) {

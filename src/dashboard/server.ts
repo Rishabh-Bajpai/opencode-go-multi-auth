@@ -8,6 +8,7 @@ import type { QuotaTracker } from '../router/quota-tracker.js'
 import { LogStream } from '../logging/log-stream.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
+import { OpenCodeUsageStore } from '../storage/opencode-usage-store.js'
 import {
   RoutingStrategy,
   ROUTING_STRATEGIES,
@@ -22,6 +23,7 @@ export class DashboardServer {
   private app: express.Application
   private server?: http.Server
   private readonly port: number
+  private readonly openCodeUsageStore: OpenCodeUsageStore
 
   constructor(
     port: number,
@@ -33,6 +35,7 @@ export class DashboardServer {
     private configStore: ConfigStore,
   ) {
     this.port = port
+    this.openCodeUsageStore = new OpenCodeUsageStore()
     this.app = express()
     this.app.use(express.json())
     this.setupRoutes()
@@ -145,13 +148,16 @@ export class DashboardServer {
 
     this.app.get('/api/status', (_req, res) => {
       const keys = this.serializeKeys()
+      const actualUsage = this.openCodeUsageStore.getSummary()
       const summary = {
         totalKeys: keys.length,
         enabledKeys: keys.filter((key) => key.enabled).length,
         activeKeys: keys.filter((key) => key.enabled && key.status === 'active').length,
         cooldownKeys: keys.filter((key) => key.status === 'cooldown').length,
         totalRequests: keys.reduce((sum, key) => sum + key.requestCount, 0),
-        totalCost: keys.reduce((sum, key) => sum + key.costAccumulated, 0),
+        totalTokens: keys.reduce((sum, key) => sum + key.tokensUsed, 0),
+        estimatedCost: keys.reduce((sum, key) => sum + key.costAccumulated, 0),
+        actualUsage,
       }
       res.json({ summary, keys })
     })
@@ -190,6 +196,9 @@ export class DashboardServer {
 
   private serializeKey(key: ApiKey) {
     const quota = this.quotaTracker.getUsageBreakdown(key.id)
+    const last7d = this.quotaTracker.getWindowedUsage(key.id, 7 * 24 * 60 * 60 * 1000)
+    const last30d = this.quotaTracker.getWindowedUsage(key.id, 30 * 24 * 60 * 60 * 1000)
+    const calendarMonth = this.quotaTracker.getCalendarMonthUsage(key.id)
     key.tokensUsed = quota.totalTokens
     key.costAccumulated = quota.costAccumulated
 
@@ -215,6 +224,11 @@ export class DashboardServer {
       tokensUsed: quota.totalTokens,
       costAccumulated: quota.costAccumulated,
       quota,
+      recentUsage: {
+        last7d,
+        last30d,
+        calendarMonth,
+      },
     }
   }
 }
