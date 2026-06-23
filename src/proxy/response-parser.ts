@@ -11,6 +11,11 @@ export interface UsageData {
   cost: number
 }
 
+export interface ParsedUsageData {
+  tokens: TokenBreakdown
+  cost: number | null
+}
+
 const DEFAULT_INPUT_RATE = 3e-6
 const DEFAULT_OUTPUT_RATE = 15e-6
 
@@ -18,19 +23,22 @@ function hasUsage(tokens: TokenBreakdown): boolean {
   return tokens.input > 0 || tokens.output > 0 || tokens.cacheRead > 0 || tokens.cacheWrite > 0 || tokens.reasoning > 0
 }
 
-function mergeUsage(current: TokenBreakdown | null, incoming: TokenBreakdown | null): TokenBreakdown | null {
+function mergeUsage(current: ParsedUsageData | null, incoming: ParsedUsageData | null): ParsedUsageData | null {
   if (!incoming) return current
   if (!current) return incoming
   return {
-    input: Math.max(current.input, incoming.input),
-    output: Math.max(current.output, incoming.output),
-    cacheRead: Math.max(current.cacheRead, incoming.cacheRead),
-    cacheWrite: Math.max(current.cacheWrite, incoming.cacheWrite),
-    reasoning: Math.max(current.reasoning, incoming.reasoning),
+    tokens: {
+      input: Math.max(current.tokens.input, incoming.tokens.input),
+      output: Math.max(current.tokens.output, incoming.tokens.output),
+      cacheRead: Math.max(current.tokens.cacheRead, incoming.tokens.cacheRead),
+      cacheWrite: Math.max(current.tokens.cacheWrite, incoming.tokens.cacheWrite),
+      reasoning: Math.max(current.tokens.reasoning, incoming.tokens.reasoning),
+    },
+    cost: incoming.cost ?? current.cost,
   }
 }
 
-function extractUsageObject(source: Record<string, any> | undefined): TokenBreakdown | null {
+function extractUsageObject(source: Record<string, any> | undefined): ParsedUsageData | null {
   if (!source) return null
 
   const tokens: TokenBreakdown = {
@@ -41,13 +49,15 @@ function extractUsageObject(source: Record<string, any> | undefined): TokenBreak
     reasoning: source.reasoning_output_tokens ?? source.completion_tokens_details?.reasoning_tokens ?? 0,
   }
 
-  return hasUsage(tokens) ? tokens : null
+  const rawCost = source.cost ?? source.total_cost ?? source.estimated_cost
+  const cost = typeof rawCost === 'number' && Number.isFinite(rawCost) ? rawCost : null
+  return hasUsage(tokens) ? { tokens, cost } : null
 }
 
-function parseJsonUsage(json: unknown): TokenBreakdown | null {
+function parseJsonUsage(json: unknown): ParsedUsageData | null {
   if (!json || typeof json !== 'object') {
     if (Array.isArray(json)) {
-      let usage: TokenBreakdown | null = null
+      let usage: ParsedUsageData | null = null
       for (const entry of json) {
         usage = mergeUsage(usage, parseJsonUsage(entry))
       }
@@ -74,10 +84,10 @@ function parseJsonUsage(json: unknown): TokenBreakdown | null {
   return usage
 }
 
-function parseEventStreamUsage(body: string): TokenBreakdown | null {
+function parseEventStreamUsage(body: string): ParsedUsageData | null {
   const normalized = body.replace(/\r\n/g, '\n')
   const blocks = normalized.split('\n\n')
-  let usage: TokenBreakdown | null = null
+  let usage: ParsedUsageData | null = null
 
   for (const block of blocks) {
     const dataLines = block
@@ -100,13 +110,17 @@ function parseEventStreamUsage(body: string): TokenBreakdown | null {
   return usage
 }
 
-export function parseTokenUsage(body: string, model?: string): TokenBreakdown | null {
+export function parseUsageData(body: string, model?: string): ParsedUsageData | null {
   try {
     const json = JSON.parse(body)
     return parseJsonUsage(json)
   } catch {
     return parseEventStreamUsage(body)
   }
+}
+
+export function parseTokenUsage(body: string, model?: string): TokenBreakdown | null {
+  return parseUsageData(body, model)?.tokens ?? null
 }
 
 export function estimateCost(tokens: TokenBreakdown, inputRate?: number, outputRate?: number): number {

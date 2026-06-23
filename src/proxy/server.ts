@@ -16,7 +16,7 @@ import {
 } from '../router/types.js'
 import { buildUpstreamHeaders, extractCacheHeaders } from './header-passthrough.js'
 import { isQuota429, resolveCooldownMs } from './quota-detector.js'
-import { estimateCost, parseTokenUsage } from './response-parser.js'
+import { estimateCost, parseUsageData } from './response-parser.js'
 import { SessionAffinityStore } from './session-affinity.js'
 
 export interface ProxyServerConfig {
@@ -258,8 +258,9 @@ export class ProxyServer {
         }
 
         const responseBody = await responseTextPromise
-        const tokens = parseTokenUsage(responseBody, prepared.model ?? undefined)
-        const cost = tokens ? estimateCost(tokens) : null
+        const usageData = parseUsageData(responseBody, prepared.model ?? undefined)
+        const tokens = usageData?.tokens ?? null
+        const cost = tokens ? (usageData?.cost ?? estimateCost(tokens)) : null
         if (tokens && cost !== null) {
           this.quotaTracker.recordUsage(key.id, tokens, cost)
         }

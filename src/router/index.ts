@@ -7,6 +7,7 @@ import { LogStream } from '../logging/log-stream.js'
 import { createLogger, getPluginMode, logToFile } from '../logging/logger.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
+import { RuntimeStateStore } from '../storage/runtime-state-store.js'
 import { NtfyNotifier } from '../notification/ntfy.js'
 import { printSetupInstructions } from '../plugin/index.js'
 import type { RouterConfig } from './types.js'
@@ -53,16 +54,40 @@ export async function createRouter(
 
   const configStore = new ConfigStore(mergedConfig.configDir)
   const secureStore = new SecureStore(mergedConfig.configDir)
+  const runtimeStateStore = new RuntimeStateStore(mergedConfig.configDir)
   const logger = createLogger(mergedConfig.logLevel)
-  const logStream = new LogStream()
 
+  let keyManager!: KeyManager
+  let quotaTracker!: QuotaTracker
+  let logStream!: LogStream
+  let persistTimer: NodeJS.Timeout | undefined
+  let persistReady = false
+
+  const persistRuntimeState = () => {
+    if (!persistReady) return
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = setTimeout(() => {
+      runtimeStateStore.save({
+        keys: keyManager.exportRuntimeState(),
+        quota: quotaTracker.exportState(),
+        logs: logStream.export(),
+      })
+    }, 100)
+  }
+
+  logStream = new LogStream(persistRuntimeState)
   mergedConfig.strategy = normalizeRoutingStrategy(configStore.get('strategy') || mergedConfig.strategy)
-  const keyManager = new KeyManager(mergedConfig)
+  keyManager = new KeyManager(mergedConfig, persistRuntimeState)
   const circuitBreaker = new CircuitBreaker(mergedConfig.circuitBreakerThreshold)
-  const quotaTracker = new QuotaTracker(mergedConfig.quotaLimit)
+  quotaTracker = new QuotaTracker(mergedConfig.quotaLimit, 2000, persistRuntimeState)
 
   const storedKeys = await secureStore.loadKeys()
   keyManager.loadStoredKeys(storedKeys)
+  const runtimeState = runtimeStateStore.load()
+  keyManager.loadRuntimeState(runtimeState.keys)
+  quotaTracker.loadState(runtimeState.quota)
+  logStream.load(runtimeState.logs)
+  persistReady = true
 
   const notifier = new NtfyNotifier(mergedConfig.ntfyUrl)
 
@@ -120,6 +145,12 @@ export async function createRouter(
     notifier,
     shutdown: async () => {
       logStream.emit(logger, 'info', 'Shutting down...')
+      if (persistTimer) clearTimeout(persistTimer)
+      runtimeStateStore.save({
+        keys: keyManager.exportRuntimeState(),
+        quota: quotaTracker.exportState(),
+        logs: logStream.export(),
+      })
       await proxyServer.stop()
       await dashboardServer.stop()
       logStream.stop()
