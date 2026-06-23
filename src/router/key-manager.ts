@@ -7,15 +7,18 @@ import type {
   StoredApiKey,
 } from './types.js'
 import { RoutingStrategy } from './types.js'
+import type { StoredKeyRuntimeState } from '../storage/runtime-state-store.js'
 
 export class KeyManager {
   private keys: ApiKey[] = []
   private roundRobinIndex = 0
   private weightedCursor = 0
   private readonly cooldownMs: number
+  private readonly onChange?: () => void
 
-  constructor(config?: Partial<RouterConfig>) {
+  constructor(config?: Partial<RouterConfig>, onChange?: () => void) {
     this.cooldownMs = config?.cooldownMs ?? 5 * 60 * 60 * 1000
+    this.onChange = onChange
   }
 
   getKeys(): ApiKey[] {
@@ -30,6 +33,7 @@ export class KeyManager {
       if (k.status === 'cooldown' && k.cooldownUntil && k.cooldownUntil <= now) {
         k.status = 'active'
         k.cooldownUntil = null
+        this.onChange?.()
         return true
       }
       return false
@@ -66,6 +70,7 @@ export class KeyManager {
     }
     this.keys.push(entry)
     this.sortKeys()
+    this.onChange?.()
     return entry
   }
 
@@ -76,6 +81,28 @@ export class KeyManager {
     }
   }
 
+  loadRuntimeState(states: StoredKeyRuntimeState[]): void {
+    const byId = new Map(states.map((entry) => [entry.id, entry]))
+    for (const key of this.keys) {
+      const state = byId.get(key.id)
+      if (!state) continue
+
+      key.status = this.normalizeStatus(state.status)
+      key.cooldownUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null
+      key.consecutiveErrors = this.normalizeNumber(state.consecutiveErrors)
+      key.tokensUsed = this.normalizeNumber(state.tokensUsed)
+      key.costAccumulated = this.normalizeNumber(state.costAccumulated)
+      key.requestCount = this.normalizeNumber(state.requestCount)
+      key.successCount = this.normalizeNumber(state.successCount)
+      key.errorCount = this.normalizeNumber(state.errorCount)
+      key.averageLatencyMs = this.normalizeNumber(state.averageLatencyMs)
+      key.lastUsedAt = typeof state.lastUsedAt === 'number' ? state.lastUsedAt : null
+      key.lastStatusCode = typeof state.lastStatusCode === 'number' ? state.lastStatusCode : null
+      key.lastModel = typeof state.lastModel === 'string' ? state.lastModel : null
+      key.lastSessionId = typeof state.lastSessionId === 'string' ? state.lastSessionId : null
+    }
+  }
+
   removeKey(id: string): boolean {
     const idx = this.keys.findIndex(k => k.id === id)
     if (idx === -1) return false
@@ -83,6 +110,7 @@ export class KeyManager {
     if (this.roundRobinIndex >= this.keys.length) {
       this.roundRobinIndex = 0
     }
+    this.onChange?.()
     return true
   }
 
@@ -138,12 +166,14 @@ export class KeyManager {
     if (!key) return
     key.status = 'cooldown'
     key.cooldownUntil = Date.now() + (cooldownMs ?? this.cooldownMs)
+    this.onChange?.()
   }
 
   markError(id: string): void {
     const key = this.getKeyById(id)
     if (!key) return
     key.consecutiveErrors++
+    this.onChange?.()
   }
 
   resetCooldown(id: string): void {
@@ -152,6 +182,7 @@ export class KeyManager {
     key.status = 'active'
     key.cooldownUntil = null
     key.consecutiveErrors = 0
+    this.onChange?.()
   }
 
   setEnabled(id: string, enabled: boolean): ApiKey | null {
@@ -165,6 +196,7 @@ export class KeyManager {
       key.cooldownUntil = null
     }
     this.sortKeys()
+    this.onChange?.()
     return key
   }
 
@@ -186,6 +218,7 @@ export class KeyManager {
     }
 
     this.sortKeys()
+    this.onChange?.()
     return key
   }
 
@@ -212,6 +245,7 @@ export class KeyManager {
     key.lastStatusCode = details.statusCode
     key.lastModel = details.model ?? key.lastModel
     key.lastSessionId = details.sessionId ?? key.lastSessionId
+    this.onChange?.()
   }
 
   toStoredEntries(): StoredApiKey[] {
@@ -223,6 +257,25 @@ export class KeyManager {
       enabled: key.enabled,
       priority: key.priority,
       weight: key.weight,
+    }))
+  }
+
+  exportRuntimeState(): StoredKeyRuntimeState[] {
+    return this.keys.map((key) => ({
+      id: key.id,
+      status: key.status,
+      cooldownUntil: key.cooldownUntil,
+      consecutiveErrors: key.consecutiveErrors,
+      tokensUsed: key.tokensUsed,
+      costAccumulated: key.costAccumulated,
+      requestCount: key.requestCount,
+      successCount: key.successCount,
+      errorCount: key.errorCount,
+      averageLatencyMs: key.averageLatencyMs,
+      lastUsedAt: key.lastUsedAt,
+      lastStatusCode: key.lastStatusCode,
+      lastModel: key.lastModel,
+      lastSessionId: key.lastSessionId,
     }))
   }
 
@@ -264,5 +317,17 @@ export class KeyManager {
   private normalizeWeight(value?: number): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 1
     return Math.max(1, Math.round(value))
+  }
+
+  private normalizeNumber(value?: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+    return value
+  }
+
+  private normalizeStatus(value?: string): KeyStatus {
+    if (value === 'active' || value === 'cooldown' || value === 'exhausted' || value === 'error') {
+      return value
+    }
+    return 'active'
   }
 }
