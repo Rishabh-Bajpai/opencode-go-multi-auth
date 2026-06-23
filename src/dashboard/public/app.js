@@ -361,7 +361,7 @@ async function saveNewKey() {
 function renderOverview() {
   if (!state.summary) return;
   renderOverviewKpis();
-  renderReconciliation();
+  renderQuotaErrors();
   renderTokenBreakdown();
   renderOverviewChart();
 }
@@ -373,7 +373,7 @@ function renderOverviewKpis() {
     { label: 'Active', value: s.activeKeys ?? 0, accent: 'green' },
     { label: 'Cooldown', value: s.cooldownKeys ?? 0, accent: s.cooldownKeys ? 'yellow' : '' },
     { label: 'Requests', value: fmtTokens(s.totalRequests ?? 0) },
-    { label: 'Spend', value: fmtCurrency(s.estimatedCost ?? 0), accent: 'accent' },
+    { label: 'Quota errors', value: fmtNumber(s.quotaErrorCount ?? 0), accent: (s.quotaErrorCount ?? 0) > 0 ? 'yellow' : '' },
   ];
   $('#overview-kpis').innerHTML = kpis.map((k) => `
     <div class="kpi">
@@ -383,38 +383,48 @@ function renderOverviewKpis() {
   `).join('');
 }
 
-function renderReconciliation() {
-  const s = state.summary || {};
-  const actual = s.actualUsage || {};
-  const router30 = s.estimatedCost || 0;
-  const opencode30 = actual.rolling30d?.cost || 0;
-  const router7 = (state.keys || []).reduce((sum, k) => sum + Number(k.recentUsage?.last7d?.cost || 0), 0);
-  const opencode7 = actual.trailing7d?.cost || 0;
-  const routerMonth = (state.keys || []).reduce((sum, k) => sum + Number(k.recentUsage?.calendarMonth?.cost || 0), 0);
-  const opencodeMonth = actual.calendarMonth?.cost || 0;
+function renderQuotaErrors() {
+  const keys = state.keys || [];
+  const rows = keys
+    .filter((k) => (k.quotaErrorCount || 0) > 0 || k.lastQuotaError)
+    .sort((a, b) => (b.quotaErrorCount || 0) - (a.quotaErrorCount || 0));
 
-  const rows = [
-    { label: '7d', router: router7, opencode: opencode7, available: actual.available },
-    { label: '30d', router: router30, opencode: opencode30, available: actual.available },
-    { label: 'Month', router: routerMonth, opencode: opencodeMonth, available: actual.available },
-  ];
+  const total = keys.reduce((sum, k) => sum + (k.quotaErrorCount || 0), 0);
+  $('#recon-meta').textContent = total === 0
+    ? 'No upstream quota errors observed yet'
+    : `${total} upstream quota error${total === 1 ? '' : 's'} caught this session`;
 
-  const max = Math.max(0.0001, ...rows.flatMap((r) => [r.router, r.opencode]));
+  const body = $('#recon-body');
+  if (rows.length === 0) {
+    body.innerHTML = `
+      <div class="empty-state" style="margin: 16px;">
+        <strong>No quota errors</strong>
+        The router will only cooldown a key when the upstream returns 402 or 429 with a quota signal.
+        Healthy state: no rows here.
+      </div>
+    `;
+    return;
+  }
 
-  const reconMeta = actual.available
-    ? `Last OpenCode update: ${fmtDateTime(actual.lastUpdatedAt)}`
-    : 'OpenCode DB unavailable';
-  $('#recon-meta').textContent = reconMeta;
-
-  $('#recon-body').innerHTML = rows.map((r) => {
-    const routerPct = (r.router / max) * 100;
-    const opencodePct = (r.opencode / max) * 100;
+  body.innerHTML = rows.map((k) => {
+    const last = k.lastQuotaError;
+    const lastStatus = last ? `HTTP ${last.statusCode}` : '';
+    const lastAt = last ? `at ${fmtDateTime(new Date(last.occurredAt).toISOString())}` : '';
+    const resetAt = last && last.resetAt ? `retry ${fmtDateTime(new Date(last.resetAt).toISOString())}` : '';
+    const msg = last && last.message ? last.message : '';
     return `
       <div class="recon-row">
-        <div class="recon-label">${r.label}</div>
-        <div class="recon-bar router" title="Router observed"><div style="width:${routerPct.toFixed(1)}%"></div></div>
-        <div class="recon-bar opencode" title="OpenCode recorded"><div style="width:${opencodePct.toFixed(1)}%"></div></div>
-        <div class="recon-amount">${fmtCurrency(r.router)} / ${fmtCurrency(r.opencode)}</div>
+        <div class="recon-label">
+          <div class="recon-key">${escapeHtml(k.alias)}</div>
+          <div class="recon-key-sub">${k.enabled ? 'enabled' : 'drained'}${k.status === 'cooldown' ? ' · cooldown' : ''}</div>
+        </div>
+        <div class="recon-bar router" title="Quota error count"><div style="width:0%"></div></div>
+        <div class="recon-bar opencode" title="Quota error count"><div style="width:0%"></div></div>
+        <div class="recon-amount">
+          <div><strong>${fmtNumber(k.quotaErrorCount)}</strong> hit${k.quotaErrorCount === 1 ? '' : 's'}</div>
+          <div class="recon-amount-sub">${escapeHtml([lastStatus, lastAt, resetAt].filter(Boolean).join(' · '))}</div>
+          ${msg ? `<div class="recon-amount-sub" title="${escapeHtml(msg)}">${escapeHtml(msg.length > 60 ? msg.slice(0, 60) + '…' : msg)}</div>` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -607,6 +617,15 @@ function renderAccountCard(key) {
     ? (key.status === 'cooldown' ? '<span class="chip chip-yellow">cooldown</span>' : '<span class="chip chip-green">active</span>')
     : '<span class="chip chip-muted">drained</span>';
 
+  const quotaErrorCount = key.quotaErrorCount || 0;
+  const lastQuotaError = key.lastQuotaError;
+  const quotaErrorChip = quotaErrorCount > 0
+    ? `<span class="chip chip-red" title="Upstream told us this key was exhausted ${quotaErrorCount} time${quotaErrorCount === 1 ? '' : 's'}. The router will not route to this key until the upstream-supplied retry time.">quota ${quotaErrorCount}</span>`
+    : '';
+  const lastQuotaLine = lastQuotaError
+    ? `<div class="account-quota-line">Last quota error: <strong>HTTP ${lastQuotaError.statusCode}</strong> ${escapeHtml(lastQuotaError.message || '')}${lastQuotaError.resetAt ? ` · retry ${fmtDateTime(new Date(lastQuotaError.resetAt).toISOString())}` : ''}</div>`
+    : '';
+
   return `
     <article class="account-card ${key.enabled ? '' : 'is-muted'}" data-id="${key.id}">
       <div class="drag-handle" draggable="true" title="Drag to reorder">⋮⋮</div>
@@ -619,8 +638,10 @@ function renderAccountCard(key) {
         </div>
         <div class="account-actions" style="margin-top: 8px;">
           ${statusChip}
+          ${quotaErrorChip}
           ${cooldown}
         </div>
+        ${lastQuotaLine}
       </div>
 
       <div class="account-meta">
@@ -907,7 +928,11 @@ function getFilteredLogs() {
   const all = [...state.archivedLogs, ...state.recentLogs];
   if (!search && !level) return all;
   return all.filter((e) => {
-    if (level && (e.level || 'info') !== level) return false;
+    if (level === 'quota') {
+      if (!e.meta?.quotaError) return false;
+    } else if (level) {
+      if ((e.level || 'info') !== level) return false;
+    }
     if (!search) return true;
     const m = e.meta || {};
     const haystack = [
@@ -918,6 +943,7 @@ function getFilteredLogs() {
       m.model || '',
       m.routeReason || '',
       m.statusCode || '',
+      m.quotaError?.message || '',
     ].join(' ').toLowerCase();
     return haystack.includes(search);
   });
@@ -975,11 +1001,13 @@ function renderLogRow(entry, idx) {
   const tokenText = tokens
     ? `I:${tokens.input || 0} O:${tokens.output || 0} CR:${tokens.cacheRead || 0} CW:${tokens.cacheWrite || 0} R:${tokens.reasoning || 0}`
     : '';
+  const isQuota = Boolean(m.quotaError);
+  const quotaPill = isQuota ? ' <span class="quota-pill">QUOTA</span>' : '';
   const expanded = state.expandedLogId === entry.__id;
   return `
-    <div class="log-row ${expanded ? 'expanded' : ''}" data-log-id="${entry.__id}" data-log-idx="${idx}">
+    <div class="log-row ${expanded ? 'expanded' : ''} ${isQuota ? 'is-quota' : ''}" data-log-id="${entry.__id}" data-log-idx="${idx}">
       <span class="cell time">${escapeHtml(fmtTime(entry.timestamp))}</span>
-      <span class="cell level level-${escapeHtml(entry.level || 'info')}">${escapeHtml((entry.level || 'info').toUpperCase())}</span>
+      <span class="cell level level-${escapeHtml(entry.level || 'info')}">${escapeHtml((entry.level || 'info').toUpperCase())}${quotaPill}</span>
       <span class="cell method">${escapeHtml(m.method || '')}</span>
       <span class="cell path" title="${escapeHtml(m.path || '')}">${escapeHtml(m.path || '')}</span>
       <span class="cell status ${statusClass}">${escapeHtml(status ? String(status) : '')}</span>
@@ -1072,7 +1100,9 @@ async function renderSettings() {
     ['Active strategy', current.strategy],
     ['Enabled keys', String(status.summary.enabledKeys)],
     ['Total requests (session)', fmtNumber(status.summary.totalRequests)],
-    ['Total cost (session)', fmtCurrency(status.summary.estimatedCost)],
+    ['Total tokens observed (session)', fmtTokens(status.summary.totalTokens ?? 0)],
+    ['Total cost observed (session)', fmtCurrency(status.summary.observedCost ?? 0)],
+    ['Quota errors caught (session)', fmtNumber(status.summary.quotaErrorCount ?? 0)],
   ];
   table.innerHTML = rows.map(([k, v]) => `
     <div class="config-key">${escapeHtml(k)}</div>

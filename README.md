@@ -4,16 +4,16 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 ## Features
 
-- **Five Routing Strategies** — Priority Failover (cache-first default), Priority Spillover, Round Robin, Weighted Cycle, Highest Remaining Quota. Each explained in the dashboard UI.
+- **Three Routing Strategies** — Priority Failover (cache-first default), Round Robin, Weighted Cycle. Each explained in the dashboard UI.
+- **React, don't predict** — The router does **not** estimate quota. It only marks a key as exhausted when the upstream itself returns 402/429 with a quota body, and uses the upstream-supplied cooldown. Cost is recorded for display only.
 - **Persistent Key Settings** — Enable/drain, priority, weight, and alias survive restarts. Keys are stored with stable IDs and encrypted at rest.
-- **Per-Key Analytics** — Request count, success/error rate, average latency, token breakdown, last model used, last session ID, remaining monthly quota.
+- **Per-Key Analytics** — Request count, success/error rate, average latency, token breakdown, last model used, last session ID, observed cost, and quota-error tally.
 - **Stream-Aware Usage Tracking** — Parses token usage from both full JSON and SSE streaming completions. Injects `stream_options.include_usage` for OpenAI-compatible streams.
-- **Proactive Quota Tracking** — Spills traffic at a configurable threshold before hitting hard limits.
 - **Circuit Breaker** — Temporarily removes unhealthy keys after 3 consecutive 5xx errors, auto-recovers after 5 minutes.
 - **Cache-Preserving Header Passthrough** — Forwards `X-Session-Id`, `prompt_cache_key` / `prompt-cache-key`, `cache_control` / `cache-control`, plus both bearer and `x-api-key` auth for broader model compatibility.
-- **Local Web UI Control Room** — Strategy explainer, key deck with inline editing, live usage ledger, routing tape with per-request route reasons and session IDs.
+- **Local Web UI Control Room** — Strategy explainer, key deck with inline editing, live usage ledger, quota-error panel, routing tape with per-request route reasons and session IDs.
 - **Secure Key Storage** — AES-256-GCM encrypted at rest using PBKDF2-derived key from machine identity.
-- **Push Notifications** — Optional ntfy notifications for exhaustion, circuit breaker trips, and proactive switches.
+- **Push Notifications** — Optional ntfy notifications for key exhaustion, all-keys-exhausted, and circuit-breaker trips/recovery.
 - **Auto-Starting OpenCode Plugin** — Install as an OpenCode plugin so the proxy and dashboard start with OpenCode automatically.
 - **Standalone or Library** — Keep a CLI/server mode for debugging, fallback use, or external automation.
 
@@ -120,12 +120,12 @@ All strategies are explained in the dashboard UI. Here is a quick reference:
 | Strategy | Cache-friendly | Priority-aware | Weight-aware | Best for |
 |---|---|---|---|---|
 | **Priority Failover** (default) | Yes | Yes | No | Keep one account warm for cache reuse |
-| **Priority Spillover** | Yes | Yes | No | Warm caches with fewer hard quota cutovers |
 | **Round Robin** | No | No | No | Simple spreading when cache reuse is less important |
 | **Weighted Cycle** | No | No | Yes | Proportional traffic distribution |
-| **Highest Remaining Quota** | No | Yes | No | Preserve fullest accounts for long sessions |
 
 Session stickiness is applied before any strategy. If a warm session key is detected, the request is pinned to its current account regardless of the active strategy.
+
+Note: the legacy `priority_spillover` and `highest_remaining_quota` strategies were removed when the router stopped estimating quota. Stored values for those strategies are mapped to `priority_failover` for backward compatibility.
 
 ## Routing Tape (Log Viewer)
 
@@ -135,17 +135,19 @@ Each log entry now includes rich metadata visible in the UI and file logs:
 - Selected key alias and why it was chosen
 - Active strategy name
 - Session ID (observed or synthesized from cache key)
-- Token breakdown and estimated cost
+- Token breakdown and upstream-observed cost (if reported)
 - Whether the route was chosen by session stickiness
+- For quota-error rows, a structured `quotaError` payload with the upstream's reset time and message
 
 ## Dashboard Control Room
 
-The dashboard is organized into four panels:
+The dashboard is organized into five pages:
 
-1. **Key Deck** — Add, enable/drain, reorder, and set priority/weight for each account. Persistent to disk.
-2. **Strategy Console** — Select an active strategy and see its description, best-for recommendation, cache friendliness, and behavior.
-3. **Live Usage Ledger** — Real-time per-key analytics: token breakdown, success/error counts, average latency, cooldown status, last model and session, and remaining monthly quota.
-4. **Routing Tape** — Structured log viewer with path, key, route reason, and cost columns. Filters, pause, and clear controls.
+1. **Overview** — KPI strip (enabled / active / cooldown / requests / quota errors), an "Errors told us" panel listing the keys the upstream has marked exhausted (with the upstream's reset time and message), the live token-throughput chart, and the per-window token breakdown.
+2. **Accounts** — Add, enable/drain, reorder (drag), and set priority/weight for each account. Each card shows its quota-error tally, last quota error (status code, message, retry time), token breakdown, latency, and last model. Persistent to disk.
+3. **Strategy Console** — Select an active strategy and see its description, best-for recommendation, cache friendliness, and behavior.
+4. **Logs** — Virtualized table of every routed request. Search across path / model / key / route reason. Filter by level or "Quota only". Click a row to see the full metadata.
+5. **Settings** — Active config (ports, strategy, total tokens observed, total observed cost, quota errors caught) and the provider config snippet to copy into `~/.opencode/opencode.json`.
 
 ## Configuration
 
@@ -158,10 +160,8 @@ Copy `.env.example` to `.env` and adjust as needed:
 | `UPSTREAM_URL` | `https://opencode.ai/zen/go/v1` | Upstream OpenCode Go API base URL |
 | `DASHBOARD_PORT` | `18904` | Web UI dashboard port |
 | `PROXY_PORT` | `18905` | Proxy server port |
-| `QUOTA_LIMIT` | `60` | Quota limit per key in USD |
-| `COOLDOWN_MS` | `18000000` | Cooldown duration for exhausted keys (ms, default 5 hours) |
+| `COOLDOWN_MS` | `18000000` | Fallback cooldown in ms when the upstream returns 402/429 without a Retry-After signal. Default 5 hours. |
 | `CIRCUIT_BREAKER_THRESHOLD` | `3` | Consecutive 5xx errors before tripping |
-| `PROACTIVE_SWITCH_THRESHOLD` | `0.95` | Usage fraction (0-1) that triggers proactive spillover |
 | `LOG_LEVEL` | `info` | Log level: `error`, `warn`, `info`, `debug` |
 | `CONFIG_DIR` | `~/.opencode` | Directory for config, encrypted key storage, and usage data |
 | `NTFY_URL` | — | Optional ntfy URL for push notifications (e.g., `https://ntfy.sh/mytopic`). Leave empty to disable. |
@@ -226,10 +226,10 @@ npm start
 
 | Event | Priority | Trigger |
 |---|---|---|
-| Key quota exhausted | High / Urgent | A key returns 402/429 with quota body, failover activates |
+| Key quota exhausted | High / Urgent | A key returns 402/429 with a quota body, the router records the upstream-supplied cooldown and moves to the next key |
 | All keys exhausted | Urgent | Every key in the pool is exhausted |
 | Circuit breaker tripped | High | 3 consecutive 5xx errors, key removed from pool |
-| Proactive quota switch | Low | Key usage crosses the proactive switch threshold |
+| Circuit breaker recovered | Low | Key is healthy again, back in the pool |
 
 ## OS Boot Service
 

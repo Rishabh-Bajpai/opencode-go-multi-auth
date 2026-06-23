@@ -597,35 +597,30 @@ input, select, textarea {
 
 .recon-row {
   display: grid;
-  grid-template-columns: 80px 1fr 1fr 90px;
-  gap: 12px;
+  grid-template-columns: minmax(140px, 1fr) 0 0 minmax(0, 1.4fr);
+  gap: 16px;
   align-items: center;
-  padding: 10px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .recon-row:last-child { border-bottom: 0; }
 .recon-label { color: var(--text-secondary); font-weight: 500; }
-.recon-bar {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--bg-elev-3);
-  overflow: hidden;
-  position: relative;
-}
-.recon-bar > div {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.24s ease;
-}
-.recon-bar.router > div { background: var(--accent); }
-.recon-bar.opencode > div { background: var(--purple); }
+.recon-key { color: var(--text); font-weight: 500; font-size: 13px; }
+.recon-key-sub { color: var(--text-faint); font-size: 11px; font-family: var(--font-mono); }
+.recon-bar { display: none; }
 .recon-amount {
-  text-align: right;
+  text-align: left;
   font-family: var(--font-mono);
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
+.recon-amount-sub { color: var(--text-faint); font-size: 11px; }
+.recon-amount strong { color: var(--red); font-weight: 600; }
 
 .stacked-bar {
   display: flex;
@@ -808,6 +803,16 @@ input, select, textarea {
   color: var(--yellow);
   border: 1px solid rgba(242, 181, 68, 0.30);
 }
+
+.account-quota-line {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.account-quota-line strong { color: var(--red); font-weight: 500; }
 
 .account-replace-popover {
   position: absolute;
@@ -1025,6 +1030,19 @@ input, select, textarea {
 .log-row .level-warn { color: var(--yellow); }
 .log-row .level-error { color: var(--red); }
 .log-row .level-debug { color: var(--text-faint); }
+.log-row.is-quota { background: rgba(244, 113, 116, 0.06); }
+.log-row .quota-pill {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
 .log-row .method { color: var(--text-secondary); }
 .log-row .path { color: var(--text); }
 .log-row .status { font-weight: 600; }
@@ -1200,6 +1218,5 @@ input, select, textarea {
   .page-header { flex-direction: column; align-items: stretch; }
   .strategy-hero { grid-template-columns: 1fr; }
   .strategy-facts { grid-template-columns: 1fr; }
-  .recon-row { grid-template-columns: 60px 1fr 60px; }
-  .recon-row .recon-bar:nth-of-type(2) { display: none; }
+  .recon-row { grid-template-columns: minmax(120px, 1fr) minmax(0, 1.6fr); }
 }
