@@ -114,6 +114,37 @@ export class KeyManager {
     return true
   }
 
+  reorderKeys(orderedIds: string[]): boolean {
+    if (orderedIds.length !== this.keys.length) return false
+    const byId = new Map(this.keys.map((key) => [key.id, key]))
+    const known = new Set(this.keys.map((key) => key.id))
+    for (const id of orderedIds) {
+      if (!known.has(id)) return false
+    }
+    const next: ApiKey[] = []
+    for (let i = 0; i < orderedIds.length; i++) {
+      const key = byId.get(orderedIds[i])!
+      key.priority = i + 1
+      next.push(key)
+    }
+    this.keys = next
+    if (this.roundRobinIndex >= this.keys.length) {
+      this.roundRobinIndex = 0
+    }
+    this.onChange?.()
+    return true
+  }
+
+  setKeyMaterial(id: string, newKey: string): ApiKey | null {
+    const key = this.getKeyById(id)
+    if (!key) return null
+    const trimmed = newKey.trim()
+    if (!trimmed) return null
+    key.key = trimmed
+    this.onChange?.()
+    return key
+  }
+
   getNextKey(strategy: RoutingStrategy, context: KeySelectionContext = {}): KeySelection | null {
     const active = this.getCandidateKeys(context)
     if (active.length === 0) return null

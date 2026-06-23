@@ -115,6 +115,36 @@ export class DashboardServer {
       res.json(this.serializeKey(key))
     })
 
+    this.app.put('/api/keys/reorder', async (req, res) => {
+      const order = Array.isArray(req.body?.order) ? req.body.order.filter((v: unknown) => typeof v === 'string') : null
+      if (!order) {
+        res.status(400).json({ error: 'order must be an array of key ids' })
+        return
+      }
+      const ok = this.keyManager.reorderKeys(order)
+      if (!ok) {
+        res.status(400).json({ error: 'Invalid order: must include every key id exactly once' })
+        return
+      }
+      await this.persistKeys()
+      res.json(this.serializeKeys())
+    })
+
+    this.app.put('/api/keys/:id/key', async (req, res) => {
+      const newKey = typeof req.body?.key === 'string' ? req.body.key : ''
+      if (!newKey.trim()) {
+        res.status(400).json({ error: 'Key is required' })
+        return
+      }
+      const updated = this.keyManager.setKeyMaterial(req.params.id, newKey)
+      if (!updated) {
+        res.status(404).json({ error: 'Key not found' })
+        return
+      }
+      await this.persistKeys()
+      res.json(this.serializeKey(updated))
+    })
+
     this.app.delete('/api/keys/:id', async (req, res) => {
       const key = this.keyManager.getKeyById(req.params.id)
       if (!key) {
