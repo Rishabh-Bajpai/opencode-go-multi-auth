@@ -1,3 +1,5 @@
+import { logToFile } from '../logging/logger.js'
+
 const PRIORITY_MAP: Record<string, number> = {
   min: 1,
   low: 2,
@@ -33,10 +35,10 @@ export class NtfyNotifier {
       })
 
       if (!response.ok) {
-        console.error(`[NTFY] Failed to send notification: HTTP ${response.status}`)
+        logToFile('error', `NTFY send failed: HTTP ${response.status}`)
       }
     } catch (err) {
-      console.error(`[NTFY] Error sending notification: ${err instanceof Error ? err.message : String(err)}`)
+      logToFile('error', `NTFY error: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

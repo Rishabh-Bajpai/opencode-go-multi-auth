@@ -1,3 +1,5 @@
+import { logToFile } from '../logging/logger.js'
+
 const CACHE_HEADERS = new Set([
   'x-session-id',
   'prompt-cache-key',
@@ -56,6 +58,7 @@ export function buildUpstreamHeaders(
   return headers
 }
 
+
 export function logCacheMissWarning(keyAlias: string): void {
-  console.warn(`[CACHE-MISS] Failover to "${keyAlias}" — cold start, no cached context`)
+  logToFile('warn', `Cache miss: failover to "${keyAlias}" — cold start, no cached context`)
 }

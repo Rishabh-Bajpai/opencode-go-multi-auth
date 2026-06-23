@@ -4,7 +4,7 @@ import { QuotaTracker } from './quota-tracker.js'
 import { ProxyServer } from '../proxy/server.js'
 import { DashboardServer } from '../dashboard/server.js'
 import { LogStream } from '../logging/log-stream.js'
-import { createLogger } from '../logging/logger.js'
+import { createLogger, getPluginMode, logToFile } from '../logging/logger.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
 import { NtfyNotifier } from '../notification/ntfy.js'
@@ -67,7 +67,7 @@ export async function createRouter(
   const notifier = new NtfyNotifier(mergedConfig.ntfyUrl)
 
   if (notifier.enabled) {
-    console.log(`[NTFY] Notifications enabled → ${mergedConfig.ntfyUrl}`)
+    logToFile('info', `NTFY notifications enabled → ${mergedConfig.ntfyUrl}`)
   }
 
   const proxyServer = new ProxyServer(
@@ -104,7 +104,7 @@ export async function createRouter(
   logStream.emit(logger, 'info', `Upstream: ${mergedConfig.upstreamUrl}`)
   logStream.emit(logger, 'info', `Loaded ${storedKeys.length} API key(s)`)
 
-  if (!options.suppressSetupInstructions) {
+  if (!options.suppressSetupInstructions && !getPluginMode()) {
     printSetupInstructions(mergedConfig.proxyPort, mergedConfig.dashboardPort)
   }
 

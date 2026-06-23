@@ -274,3 +274,19 @@ Now when ports are taken, the Promise rejects with `EADDRINUSE`, which is caught
 - `npm run build` — clean compilation
 - Committed: `fix: handle EADDRINUSE in proxy and dashboard server start() to prevent hang on multi-instance`
 
+### Follow-up: Proxy Dies When Primary Instance Exits
+
+**Problem:** After fixing the hang, a new issue appeared: when the first opencode instance (which owns the proxy) exits, its process dies and takes the proxy server with it. The second instance had detected `EADDRINUSE` and skipped starting servers, so now no proxy is running.
+
+**Fix:** Rewrote `opencode-plugin.ts` with a **health monitor**:
+- **Primary instance** (starts servers successfully) → works as before
+- **Secondary instance** (detects `EADDRINUSE`) → starts a 5-second health check loop
+  - Pings `http://localhost:18905/v1/models` every 5s
+  - If the proxy becomes unreachable (primary exited), the secondary **automatically takes over** by starting its own proxy/dashboard servers
+  - If another instance beats it to the port, it resumes monitoring
+
+**Key design:** `dispose()` now also stops the health monitor and only shuts down servers if this instance owns them.
+
+- Committed: `fix: add health monitor for secondary instances to auto-restart proxy when primary exits`
+
+
