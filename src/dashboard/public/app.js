@@ -155,6 +155,7 @@ function setPage(page) {
   if (page === 'overview') renderOverview();
   if (page === 'routing') renderRouting();
   if (page === 'accounts') renderAccounts();
+  if (page === 'tokens') renderTokens();
   if (page === 'settings') renderSettings();
 }
 
@@ -171,6 +172,7 @@ function initRouting() {
 document.addEventListener('DOMContentLoaded', async () => {
   initRouting();
   initModal();
+  initTokensPage();
   initLogsToolbar();
   initSearch();
   connectWebSocket();
@@ -310,6 +312,9 @@ function ingestLog(entry, { initial = false } = {}) {
   }
   if (state.currentPage === 'overview') {
     scheduleOverviewChart();
+  }
+  if (state.currentPage === 'tokens') {
+    scheduleTokensRender();
   }
 }
 
@@ -1078,6 +1083,483 @@ function initSearch() {
       chip.classList.add('active');
       state.logFilter.level = chip.dataset.level || '';
       ensureLogRender();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Page: Tokens
+// ---------------------------------------------------------------------------
+
+const TOKENS_WINDOWS = {
+  3600000: { bucketMs: 60_000, label: 'Last 1h', fmtTick: 'time' },
+  21600000: { bucketMs: 5 * 60_000, label: 'Last 6h', fmtTick: 'time' },
+  86400000: { bucketMs: 15 * 60_000, label: 'Last 24h', fmtTick: 'datetime' },
+  604800000: { bucketMs: 60 * 60_000, label: 'Last 7d', fmtTick: 'datetime' },
+  2592000000: { bucketMs: 6 * 60 * 60_000, label: 'Last 30d', fmtTick: 'date' },
+};
+
+const TOKENS_CATEGORIES = [
+  { key: 'input', label: 'Input', color: 'var(--accent)' },
+  { key: 'output', label: 'Output', color: 'var(--green)' },
+  { key: 'cacheRead', label: 'Cache read', color: 'var(--purple)' },
+  { key: 'cacheWrite', label: 'Cache write', color: 'var(--yellow)' },
+  { key: 'reasoning', label: 'Reasoning', color: 'var(--red)' },
+];
+
+const tokensState = {
+  windowMs: 86_400_000,
+  pending: false,
+};
+
+function getTokenLogsInWindow(windowMs, now = Date.now()) {
+  const cutoff = now - windowMs;
+  const out = [];
+  for (const entry of state.archivedLogs) {
+    const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0;
+    if (ts >= cutoff) out.push(entry);
+  }
+  for (const entry of state.recentLogs) {
+    const ts = entry.timestamp ? new Date(entry.timestamp).getTime() : 0;
+    if (ts >= cutoff) out.push(entry);
+  }
+  return out;
+}
+
+function bucketize(entries, bucketMs) {
+  if (!entries.length) return { buckets: [], tMin: 0, tMax: 0 };
+  let tMin = Infinity;
+  let tMax = -Infinity;
+  for (const e of entries) {
+    const ts = new Date(e.timestamp).getTime();
+    if (ts < tMin) tMin = ts;
+    if (ts > tMax) tMax = ts;
+  }
+  const firstBucket = Math.floor(tMin / bucketMs) * bucketMs;
+  const lastBucket = Math.floor(tMax / bucketMs) * bucketMs;
+  const numBuckets = Math.max(1, Math.floor((lastBucket - firstBucket) / bucketMs) + 1);
+  const buckets = [];
+  for (let i = 0; i < numBuckets; i++) {
+    buckets.push({
+      t: firstBucket + i * bucketMs,
+      byCategory: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+      byModel: new Map(),
+      byKey: new Map(),
+      cost: 0,
+      requests: 0,
+    });
+  }
+  const indexFor = (ts) => Math.floor((ts - firstBucket) / bucketMs);
+  for (const e of entries) {
+    const ts = new Date(e.timestamp).getTime();
+    if (!Number.isFinite(ts)) continue;
+    const m = e.meta || {};
+    const tokens = m.tokens || null;
+    if (!tokens) continue;
+    const idx = indexFor(ts);
+    if (idx < 0 || idx >= buckets.length) continue;
+    const b = buckets[idx];
+    b.requests += 1;
+    b.byCategory.input += tokens.input || 0;
+    b.byCategory.output += tokens.output || 0;
+    b.byCategory.cacheRead += tokens.cacheRead || 0;
+    b.byCategory.cacheWrite += tokens.cacheWrite || 0;
+    b.byCategory.reasoning += tokens.reasoning || 0;
+    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) {
+      b.cost += m.cost;
+    }
+    const modelKey = m.model || '(unknown)';
+    let mb = b.byModel.get(modelKey);
+    if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byModel.set(modelKey, mb); }
+    mb.input += tokens.input || 0;
+    mb.output += tokens.output || 0;
+    mb.cacheRead += tokens.cacheRead || 0;
+    mb.cacheWrite += tokens.cacheWrite || 0;
+    mb.reasoning += tokens.reasoning || 0;
+    mb.requests += 1;
+    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+    const keyKey = m.keyAlias || '(unassigned)';
+    let kb = b.byKey.get(keyKey);
+    if (!kb) { kb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byKey.set(keyKey, kb); }
+    kb.input += tokens.input || 0;
+    kb.output += tokens.output || 0;
+    kb.cacheRead += tokens.cacheRead || 0;
+    kb.cacheWrite += tokens.cacheWrite || 0;
+    kb.reasoning += tokens.reasoning || 0;
+    kb.requests += 1;
+    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) kb.cost += m.cost;
+  }
+  return { buckets, tMin: firstBucket, tMax: lastBucket + bucketMs };
+}
+
+function aggregateAll(entries) {
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 };
+  const byModel = new Map();
+  for (const e of entries) {
+    const m = e.meta || {};
+    const t = m.tokens;
+    if (!t) continue;
+    totals.requests += 1;
+    totals.input += t.input || 0;
+    totals.output += t.output || 0;
+    totals.cacheRead += t.cacheRead || 0;
+    totals.cacheWrite += t.cacheWrite || 0;
+    totals.reasoning += t.reasoning || 0;
+    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) totals.cost += m.cost;
+    const modelKey = m.model || '(unknown)';
+    let mb = byModel.get(modelKey);
+    if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; byModel.set(modelKey, mb); }
+    mb.input += t.input || 0;
+    mb.output += t.output || 0;
+    mb.cacheRead += t.cacheRead || 0;
+    mb.cacheWrite += t.cacheWrite || 0;
+    mb.reasoning += t.reasoning || 0;
+    mb.requests += 1;
+    if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
+  }
+  return { totals, byModel };
+}
+
+function renderTokensKpis(totals) {
+  const kpis = [
+    { label: 'Requests', value: fmtTokens(totals.requests) },
+    { label: 'Total tokens', value: fmtTokens(totals.input + totals.output + totals.cacheRead + totals.cacheWrite + totals.reasoning) },
+    { label: 'Cache read', value: fmtTokens(totals.cacheRead), accent: 'purple' },
+    { label: 'Cache write', value: fmtTokens(totals.cacheWrite), accent: 'yellow' },
+    { label: 'Observed cost', value: fmtCurrency(totals.cost), accent: 'accent' },
+  ];
+  $('#tokens-kpis').innerHTML = kpis.map((k) => `
+    <div class="kpi">
+      <span class="kpi-label">${escapeHtml(k.label)}</span>
+      <span class="kpi-value ${k.accent || ''}">${escapeHtml(String(k.value))}</span>
+    </div>
+  `).join('');
+}
+
+function renderTokensSharedChart(buckets) {
+  const host = $('#tokens-shared-chart');
+  if (!host) return;
+  if (!buckets.length) {
+    host.innerHTML = `<div style="height: 220px; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; font-family: var(--font-mono);">No log entries with token usage in this window.</div>`;
+    return;
+  }
+  if (buckets.length === 1) {
+    const b = buckets[0];
+    const stackTop = TOKENS_CATEGORIES.reduce((s, c) => s + (b.byCategory[c.key] || 0), 0);
+    host.innerHTML = `<div style="height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-muted); font-size: 12px; font-family: var(--font-mono);">
+      <div>Single bucket: ${fmtTokens(stackTop)} tokens in this window</div>
+      <div style="display: flex; gap: 12px; font-size: 11px;">
+        ${TOKENS_CATEGORIES.map((c) => `<span><span class="swatch" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.color};margin-right:4px;vertical-align:middle;"></span>${escapeHtml(c.label)} ${fmtTokens(b.byCategory[c.key] || 0)}</span>`).join('')}
+      </div>
+    </div>`;
+    return;
+  }
+  host.innerHTML = stackedAreaChartSvg(buckets, { width: 1080, height: 240, padding: { top: 12, right: 12, bottom: 28, left: 50 } });
+}
+
+function stackedAreaChartSvg(buckets, opts) {
+  const { width, height, padding } = opts;
+  const innerW = width - padding.left - padding.right;
+  const innerH = height - padding.top - padding.bottom;
+  const tMin = buckets[0].t;
+  const tMax = buckets[buckets.length - 1].t + 1;
+  const span = Math.max(1, tMax - tMin);
+  const x = (t) => padding.left + ((t - tMin) / span) * innerW;
+
+  // Compute stack totals per bucket to find max.
+  const stackTop = buckets.map((b) => {
+    let acc = 0;
+    for (const c of TOKENS_CATEGORIES) acc += b.byCategory[c.key] || 0;
+    return acc;
+  });
+  const yMax = Math.max(1, ...stackTop);
+  const y = (v) => padding.top + innerH - (v / yMax) * innerH;
+
+  const grid = [];
+  for (let i = 0; i <= 4; i++) {
+    const yy = padding.top + (innerH / 4) * i;
+    grid.push(`<line x1="${padding.left}" y1="${yy}" x2="${width - padding.right}" y2="${yy}"/>`);
+  }
+
+  // Build stacked areas. For each category, draw a path from the bottom of
+  // that category to the top, then back along the top of the previous one.
+  const areaPaths = [];
+  const cumUpper = TOKENS_CATEGORIES.map(() => new Array(buckets.length).fill(0));
+  const cumLower = TOKENS_CATEGORIES.map(() => new Array(buckets.length).fill(0));
+  for (let bi = 0; bi < buckets.length; bi++) {
+    let acc = 0;
+    for (let ci = 0; ci < TOKENS_CATEGORIES.length; ci++) {
+      cumLower[ci][bi] = acc;
+      acc += buckets[bi].byCategory[TOKENS_CATEGORIES[ci].key] || 0;
+      cumUpper[ci][bi] = acc;
+    }
+  }
+  for (let ci = 0; ci < TOKENS_CATEGORIES.length; ci++) {
+    const cat = TOKENS_CATEGORIES[ci];
+    const parts = [];
+    for (let i = 0; i < buckets.length; i++) {
+      const xt = x(buckets[i].t).toFixed(1);
+      const yt = y(cumUpper[ci][i]).toFixed(1);
+      parts.push((i === 0 ? 'M' : 'L') + xt + ',' + yt);
+    }
+    for (let i = buckets.length - 1; i >= 0; i--) {
+      const xt = x(buckets[i].t).toFixed(1);
+      const yb = y(cumLower[ci][i]).toFixed(1);
+      parts.push('L' + xt + ',' + yb);
+    }
+    const path = parts.join(' ') + ' Z';
+    areaPaths.push(`<path d="${path}" fill="${cat.color}" fill-opacity="0.55" stroke="${cat.color}" stroke-opacity="0.5" stroke-width="0.5"/>`);
+  }
+
+  const tickFmt = (t) => {
+    const d = new Date(t);
+    if (TOKENS_WINDOWS[tokensState.windowMs]?.fmtTick === 'date') {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    if (TOKENS_WINDOWS[tokensState.windowMs]?.fmtTick === 'datetime') {
+      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+
+  return `
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+      <g class="grid">${grid.join('')}</g>
+      <g class="axis">
+        <text x="${padding.left}" y="${height - 8}">${tickFmt(tMin)}</text>
+        <text x="${width - padding.right}" y="${height - 8}" text-anchor="end">${tickFmt(tMax)}</text>
+        <text x="4" y="${padding.top + 8}">${fmtTokens(yMax)}</text>
+        <text x="4" y="${padding.top + innerH}">0</text>
+      </g>
+      ${areaPaths.join('')}
+    </svg>
+  `;
+}
+
+function renderTokensModelsTable(byModel) {
+  const host = $('#tokens-models-table');
+  if (!host) return;
+  const rows = [...byModel.entries()].map(([model, agg]) => {
+    const total = agg.input + agg.output + agg.cacheRead + agg.cacheWrite + agg.reasoning;
+    return { model, agg, total };
+  }).sort((a, b) => b.total - a.total);
+  if (rows.length === 0) {
+    host.innerHTML = `<div class="empty-state"><strong>No model data</strong>Token-usage log entries with a model field will appear here.</div>`;
+    return;
+  }
+  const head = `
+    <div class="tr">
+      <div class="th">Model</div>
+      <div class="th" style="text-align: right;">Req</div>
+      <div class="th" style="text-align: right;">Input</div>
+      <div class="th" style="text-align: right;">Output</div>
+      <div class="th" style="text-align: right;">CR</div>
+      <div class="th" style="text-align: right;">CW</div>
+      <div class="th" style="text-align: right;">Reasoning</div>
+      <div class="th" style="text-align: right;">Total</div>
+      <div class="th" style="text-align: right;">Cost</div>
+      <div class="th" style="min-width: 100px;">Share</div>
+    </div>
+  `;
+  const body = rows.map(({ model, agg, total }) => {
+    const pct = (v) => total > 0 ? (v / total) * 100 : 0;
+    return `
+      <div class="tr">
+        <div class="td td-model">${escapeHtml(model)}</div>
+        <div class="td td-num" style="text-align: right;">${fmtNumber(agg.requests)}</div>
+        <div class="td td-num" style="text-align: right;">${fmtTokens(agg.input)}</div>
+        <div class="td td-num" style="text-align: right;">${fmtTokens(agg.output)}</div>
+        <div class="td td-num" style="text-align: right;">${fmtTokens(agg.cacheRead)}</div>
+        <div class="td td-num" style="text-align: right;">${fmtTokens(agg.cacheWrite)}</div>
+        <div class="td td-num" style="text-align: right;">${fmtTokens(agg.reasoning)}</div>
+        <div class="td td-num" style="text-align: right;"><strong>${fmtTokens(total)}</strong></div>
+        <div class="td td-num" style="text-align: right;">${fmtCurrency(agg.cost)}</div>
+        <div class="td"><div class="tokens-bar" title="Input / Output / CR / CW / R">
+          <span class="seg-input" style="width:${pct(agg.input).toFixed(2)}%"></span>
+          <span class="seg-output" style="width:${pct(agg.output).toFixed(2)}%"></span>
+          <span class="seg-cr" style="width:${pct(agg.cacheRead).toFixed(2)}%"></span>
+          <span class="seg-cw" style="width:${pct(agg.cacheWrite).toFixed(2)}%"></span>
+          <span class="seg-r" style="width:${pct(agg.reasoning).toFixed(2)}%"></span>
+        </div></div>
+      </div>
+    `;
+  }).join('');
+  host.innerHTML = head + body;
+}
+
+function renderTokensModelSeries(buckets) {
+  const host = $('#tokens-model-series');
+  if (!host) return;
+  // Aggregate by model across all buckets to find which models are worth showing.
+  const modelTotals = new Map();
+  for (const b of buckets) {
+    for (const [model, agg] of b.byModel) {
+      const cur = modelTotals.get(model) || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 };
+      cur.input += agg.input; cur.output += agg.output; cur.cacheRead += agg.cacheRead; cur.cacheWrite += agg.cacheWrite; cur.reasoning += agg.reasoning; cur.requests += agg.requests; cur.cost += agg.cost;
+      modelTotals.set(model, cur);
+    }
+  }
+  if (modelTotals.size === 0) {
+    host.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;"><strong>No model activity in this window</strong>Try a wider time window or wait for new traffic.</div>`;
+    return;
+  }
+  const sorted = [...modelTotals.entries()].sort((a, b) => {
+    const sa = a[1].input + a[1].output + a[1].cacheRead + a[1].cacheWrite + a[1].reasoning;
+    const sb = b[1].input + b[1].output + b[1].cacheRead + b[1].cacheWrite + b[1].reasoning;
+    return sb - sa;
+  });
+  host.innerHTML = sorted.map(([model, agg]) => {
+    const total = agg.input + agg.output + agg.cacheRead + agg.cacheWrite + agg.reasoning;
+    const cleanSeries = TOKENS_CATEGORIES.map((cat) => ({
+      key: cat.key, label: cat.label, color: cat.color,
+      points: buckets.map((b) => {
+        const mb = b.byModel.get(model);
+        return { t: b.t, v: mb ? (mb[cat.key] || 0) : 0 };
+      }),
+    }));
+    return `
+      <div class="tokens-mini">
+        <div class="tokens-mini-head">
+          <span class="tokens-mini-name">${escapeHtml(model)}</span>
+          <span class="tokens-mini-total">${fmtTokens(total)} tok</span>
+        </div>
+        ${miniStackedAreaSvg(cleanSeries, buckets)}
+        <div class="tokens-mini-legend">
+          ${TOKENS_CATEGORIES.map((c) => `<span class="item"><span class="swatch" style="background:${c.color};"></span>${escapeHtml(c.label)} <strong style="color: var(--text-secondary); margin-left: 2px;">${fmtTokens(agg[c.key] || 0)}</strong></span>`).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function miniStackedAreaSvg(series, buckets) {
+  if (!buckets.length) {
+    return `<svg class="tokens-mini-svg" viewBox="0 0 360 100" preserveAspectRatio="none"></svg>`;
+  }
+  const width = 360, height = 100, padTop = 4, padBottom = 4, padX = 2;
+  const innerW = width - padX * 2;
+  const innerH = height - padTop - padBottom;
+  const tMin = buckets[0].t;
+  const tMax = buckets[buckets.length - 1].t + 1;
+  const span = Math.max(1, tMax - tMin);
+  const x = (t) => padX + ((t - tMin) / span) * innerW;
+  // Per-bucket stack top
+  const stackTops = buckets.map((b) => series.reduce((s, s2) => s + (s2.points[buckets.indexOf(b)]?.v || 0), 0));
+  const yMax = Math.max(1, ...stackTops);
+  const y = (v) => padTop + innerH - (v / yMax) * innerH;
+
+  // Build cumulative
+  const cumUpper = series.map(() => new Array(buckets.length).fill(0));
+  const cumLower = series.map(() => new Array(buckets.length).fill(0));
+  for (let bi = 0; bi < buckets.length; bi++) {
+    let acc = 0;
+    for (let si = 0; si < series.length; si++) {
+      cumLower[si][bi] = acc;
+      acc += series[si].points[bi]?.v || 0;
+      cumUpper[si][bi] = acc;
+    }
+  }
+  const paths = series.map((s, si) => {
+    const parts = [];
+    for (let i = 0; i < buckets.length; i++) {
+      const xt = x(buckets[i].t).toFixed(1);
+      const yt = y(cumUpper[si][i]).toFixed(1);
+      parts.push((i === 0 ? 'M' : 'L') + xt + ',' + yt);
+    }
+    for (let i = buckets.length - 1; i >= 0; i--) {
+      const xt = x(buckets[i].t).toFixed(1);
+      const yb = y(cumLower[si][i]).toFixed(1);
+      parts.push('L' + xt + ',' + yb);
+    }
+    return `<path d="${parts.join(' ')} Z" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-opacity="0.4" stroke-width="0.5"/>`;
+  }).join('');
+  return `<svg class="tokens-mini-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${paths}</svg>`;
+}
+
+function renderTokensKeySeries(buckets) {
+  const host = $('#tokens-key-series');
+  if (!host) return;
+  const keyTotals = new Map();
+  for (const b of buckets) {
+    for (const [key, agg] of b.byKey) {
+      const cur = keyTotals.get(key) || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 };
+      cur.input += agg.input; cur.output += agg.output; cur.cacheRead += agg.cacheRead; cur.cacheWrite += agg.cacheWrite; cur.reasoning += agg.reasoning; cur.requests += agg.requests; cur.cost += agg.cost;
+      keyTotals.set(key, cur);
+    }
+  }
+  if (keyTotals.size === 0) {
+    host.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;"><strong>No key activity in this window</strong></div>`;
+    return;
+  }
+  const sorted = [...keyTotals.entries()].sort((a, b) => {
+    const sa = a[1].input + a[1].output + a[1].cacheRead + a[1].cacheWrite + a[1].reasoning;
+    const sb = b[1].input + b[1].output + b[1].cacheRead + b[1].cacheWrite + b[1].reasoning;
+    return sb - sa;
+  });
+  host.innerHTML = sorted.map(([key, agg]) => {
+    const total = agg.input + agg.output + agg.cacheRead + agg.cacheWrite + agg.reasoning;
+    const series = TOKENS_CATEGORIES.map((cat) => ({
+      key: cat.key, label: cat.label, color: cat.color,
+      points: buckets.map((b) => {
+        const kb = b.byKey.get(key);
+        return { t: b.t, v: kb ? (kb[cat.key] || 0) : 0 };
+      }),
+    }));
+    return `
+      <div class="tokens-mini">
+        <div class="tokens-mini-head">
+          <span class="tokens-mini-name">${escapeHtml(key)}</span>
+          <span class="tokens-mini-total">${fmtTokens(total)} tok</span>
+        </div>
+        ${miniStackedAreaSvg(series, buckets)}
+        <div class="tokens-mini-legend">
+          ${TOKENS_CATEGORIES.map((c) => `<span class="item"><span class="swatch" style="background:${c.color};"></span>${escapeHtml(c.label)} <strong style="color: var(--text-secondary); margin-left: 2px;">${fmtTokens(agg[c.key] || 0)}</strong></span>`).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderTokens() {
+  const windowMs = tokensState.windowMs;
+  const config = TOKENS_WINDOWS[windowMs] || TOKENS_WINDOWS[86400000];
+  const entries = getTokenLogsInWindow(windowMs);
+  const { totals, byModel } = aggregateAll(entries);
+  const { buckets } = bucketize(entries, config.bucketMs);
+
+  const label = config.label;
+  $('#tokens-shared-meta').textContent = `${label} · stacked area by category · bucket ${formatBucket(config.bucketMs)}`;
+  $('#tokens-models-meta').textContent = `${label} · ${byModel.size} model${byModel.size === 1 ? '' : 's'}`;
+  $('#tokens-model-series-meta').textContent = `${label} · one chart per model · stacked by category`;
+  $('#tokens-data-note').textContent = `Showing ${fmtNumber(entries.length)} log entr${entries.length === 1 ? 'y' : 'ies'} from the live buffer (500 recent + 10,000 archived). Anything older than the buffer is not shown.`;
+
+  renderTokensKpis(totals);
+  renderTokensSharedChart(buckets);
+  renderTokensModelsTable(byModel);
+  renderTokensModelSeries(buckets);
+  renderTokensKeySeries(buckets);
+}
+
+function formatBucket(ms) {
+  if (ms < 60_000) return `${ms / 1000}s`;
+  if (ms < 3600_000) return `${ms / 60_000}m`;
+  return `${ms / 3600_000}h`;
+}
+
+const scheduleTokensRender = rAFThrottle(() => {
+  if (state.currentPage === 'tokens') renderTokens();
+});
+
+function initTokensPage() {
+  $$('#tokens-windows .filter-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      $$('#tokens-windows .filter-chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      const w = Number(chip.dataset.window);
+      if (Number.isFinite(w) && TOKENS_WINDOWS[w]) {
+        tokensState.windowMs = w;
+        renderTokens();
+      }
     });
   });
 }
