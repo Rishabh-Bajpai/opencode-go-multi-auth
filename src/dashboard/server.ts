@@ -72,21 +72,19 @@ export class DashboardServer {
       res.json(this.serializeKey(entry))
     })
 
-    this.app.put('/api/keys/:id', async (req, res) => {
-      const { alias, enabled, priority, weight } = req.body ?? {}
-      const updated = this.keyManager.updateKeySettings(req.params.id, {
-        alias,
-        enabled,
-        priority,
-        weight,
-      })
-      if (!updated) {
-        res.status(404).json({ error: 'Key not found' })
+    this.app.put('/api/keys/reorder', async (req, res) => {
+      const order = Array.isArray(req.body?.order) ? req.body.order.filter((v: unknown) => typeof v === 'string') : null
+      if (!order) {
+        res.status(400).json({ error: 'order must be an array of key ids' })
         return
       }
-
+      const ok = this.keyManager.reorderKeys(order)
+      if (!ok) {
+        res.status(400).json({ error: 'Invalid order: must include every key id exactly once' })
+        return
+      }
       await this.persistKeys()
-      res.json(this.serializeKey(updated))
+      res.json(this.serializeKeys())
     })
 
     this.app.put('/api/keys/:id/toggle', async (req, res) => {
@@ -115,21 +113,6 @@ export class DashboardServer {
       res.json(this.serializeKey(key))
     })
 
-    this.app.put('/api/keys/reorder', async (req, res) => {
-      const order = Array.isArray(req.body?.order) ? req.body.order.filter((v: unknown) => typeof v === 'string') : null
-      if (!order) {
-        res.status(400).json({ error: 'order must be an array of key ids' })
-        return
-      }
-      const ok = this.keyManager.reorderKeys(order)
-      if (!ok) {
-        res.status(400).json({ error: 'Invalid order: must include every key id exactly once' })
-        return
-      }
-      await this.persistKeys()
-      res.json(this.serializeKeys())
-    })
-
     this.app.put('/api/keys/:id/key', async (req, res) => {
       const newKey = typeof req.body?.key === 'string' ? req.body.key : ''
       if (!newKey.trim()) {
@@ -141,6 +124,23 @@ export class DashboardServer {
         res.status(404).json({ error: 'Key not found' })
         return
       }
+      await this.persistKeys()
+      res.json(this.serializeKey(updated))
+    })
+
+    this.app.put('/api/keys/:id', async (req, res) => {
+      const { alias, enabled, priority, weight } = req.body ?? {}
+      const updated = this.keyManager.updateKeySettings(req.params.id, {
+        alias,
+        enabled,
+        priority,
+        weight,
+      })
+      if (!updated) {
+        res.status(404).json({ error: 'Key not found' })
+        return
+      }
+
       await this.persistKeys()
       res.json(this.serializeKey(updated))
     })
