@@ -368,6 +368,7 @@ function renderOverview() {
   renderOverviewKpis();
   renderQuotaErrors();
   renderTokenBreakdown();
+  renderToken30d();
   renderOverviewChart();
 }
 
@@ -448,6 +449,43 @@ function renderTokenBreakdown() {
   const sum = totals.input + totals.output + totals.cacheRead + totals.cacheWrite + totals.reasoning;
   const pct = (v) => sum > 0 ? (v / sum) * 100 : 0;
   $('#breakdown-body').innerHTML = `
+    <div style="display: grid; gap: 10px;">
+      <div class="stacked-bar" title="Input / Output / Cache read / Cache write / Reasoning">
+        <span class="seg-input" style="width:${pct(totals.input).toFixed(2)}%"></span>
+        <span class="seg-output" style="width:${pct(totals.output).toFixed(2)}%"></span>
+        <span class="seg-cr" style="width:${pct(totals.cacheRead).toFixed(2)}%"></span>
+        <span class="seg-cw" style="width:${pct(totals.cacheWrite).toFixed(2)}%"></span>
+        <span class="seg-r" style="width:${pct(totals.reasoning).toFixed(2)}%"></span>
+      </div>
+      <div class="chart-legend" style="padding: 0;">
+        <span><span class="swatch" style="background: var(--accent);"></span>Input ${fmtTokens(totals.input)}</span>
+        <span><span class="swatch" style="background: var(--green);"></span>Output ${fmtTokens(totals.output)}</span>
+        <span><span class="swatch" style="background: var(--purple);"></span>Cache read ${fmtTokens(totals.cacheRead)}</span>
+        <span><span class="swatch" style="background: var(--yellow);"></span>Cache write ${fmtTokens(totals.cacheWrite)}</span>
+        <span><span class="swatch" style="background: var(--red);"></span>Reasoning ${fmtTokens(totals.reasoning)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderToken30d() {
+  const host = $('#overview-30d');
+  if (!host) return;
+  const keys = state.keys || [];
+  const totals = keys.reduce((acc, k) => {
+    const u = k.recentUsage?.last30d || {};
+    acc.input += u.input || 0;
+    acc.output += u.output || 0;
+    acc.cacheRead += u.cacheRead || 0;
+    acc.cacheWrite += u.cacheWrite || 0;
+    acc.reasoning += u.reasoning || 0;
+    acc.totalTokens += u.totalTokens || 0;
+    acc.cost += u.cost || 0;
+    return acc;
+  }, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, cost: 0 });
+  const sum = totals.input + totals.output + totals.cacheRead + totals.cacheWrite + totals.reasoning;
+  const pct = (v) => sum > 0 ? (v / sum) * 100 : 0;
+  host.innerHTML = `
     <div style="display: grid; gap: 10px;">
       <div class="stacked-bar" title="Input / Output / Cache read / Cache write / Reasoning">
         <span class="seg-input" style="width:${pct(totals.input).toFixed(2)}%"></span>
@@ -1200,10 +1238,11 @@ function bucketize(entries, bucketMs, rangeStart, rangeEnd) {
       if (!mb) { mb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byModel.set(m.model, mb); }
       mb.requests += 1;
     }
-    const keyKey = m.keyAlias || '(unassigned)';
-    let kb = b.byKey.get(keyKey);
-    if (!kb) { kb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byKey.set(keyKey, kb); }
-    kb.requests += 1;
+    if (m.keyAlias) {
+      let kb = b.byKey.get(m.keyAlias);
+      if (!kb) { kb = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, requests: 0, cost: 0 }; b.byKey.set(m.keyAlias, kb); }
+      kb.requests += 1;
+    }
     if (tokens) {
       b.byCategory.input += tokens.input || 0;
       b.byCategory.output += tokens.output || 0;
@@ -1222,12 +1261,17 @@ function bucketize(entries, bucketMs, rangeStart, rangeEnd) {
           if (typeof m.cost === 'number' && Number.isFinite(m.cost)) mb.cost += m.cost;
         }
       }
-      kb.input += tokens.input || 0;
-      kb.output += tokens.output || 0;
-      kb.cacheRead += tokens.cacheRead || 0;
-      kb.cacheWrite += tokens.cacheWrite || 0;
-      kb.reasoning += tokens.reasoning || 0;
-      if (typeof m.cost === 'number' && Number.isFinite(m.cost)) kb.cost += m.cost;
+      if (m.keyAlias) {
+        const kb = b.byKey.get(m.keyAlias);
+        if (kb) {
+          kb.input += tokens.input || 0;
+          kb.output += tokens.output || 0;
+          kb.cacheRead += tokens.cacheRead || 0;
+          kb.cacheWrite += tokens.cacheWrite || 0;
+          kb.reasoning += tokens.reasoning || 0;
+          if (typeof m.cost === 'number' && Number.isFinite(m.cost)) kb.cost += m.cost;
+        }
+      }
     }
   }
   return { buckets, tMin: firstBucket, tMax: lastBucket + bucketMs };
