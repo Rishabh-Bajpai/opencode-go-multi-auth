@@ -12,12 +12,16 @@ function getProxyPort(): number {
 }
 
 /**
- * Check if a TCP port is accepting connections.
- * Much more reliable than HTTP requests — works even if the server
- * doesn't have a specific endpoint.
+ * Two-phase health check:
+ * 1. TCP probe — is anything listening on the port? (fast, catches "port free" case)
+ * 2. HTTP liveness — is the server actually responding? (catches stopped/zombie processes)
+ *
+ * A stopped process (Ctrl+Z, SIGTSTP) can hold ports open but won't respond to HTTP.
+ * The TCP probe alone would report it as "alive" — the HTTP check catches this.
  */
-function isPortListening(port: number, timeoutMs = 2000): Promise<boolean> {
-  return new Promise((resolve) => {
+async function isProxyAlive(): Promise<boolean> {
+  // Phase 1: TCP port probe
+  const tcpAlive = await new Promise<boolean>((resolve) => {
     const socket = new net.Socket()
     let resolved = false
 
@@ -28,12 +32,31 @@ function isPortListening(port: number, timeoutMs = 2000): Promise<boolean> {
       resolve(result)
     }
 
-    socket.setTimeout(timeoutMs)
+    socket.setTimeout(1500)
     socket.once('connect', () => done(true))
     socket.once('timeout', () => done(false))
     socket.once('error', () => done(false))
-    socket.connect(port, '127.0.0.1')
+    socket.connect(getProxyPort(), '127.0.0.1')
   })
+
+  if (!tcpAlive) return false
+
+  // Phase 2: HTTP liveness — confirm server is actually processing requests
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+
+    // Use HEAD to /v1 — minimal overhead, any HTTP response = alive
+    const res = await fetch(`http://127.0.0.1:${getProxyPort()}/v1`, {
+      method: 'HEAD',
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+    return true // Any response (even 4xx/5xx) means server is processing
+  } catch {
+    // Timeout or connection error — server is not responding
+    return false
+  }
 }
 
 async function tryStartRouter(): Promise<RouterInstance | null> {
@@ -56,9 +79,9 @@ function startHealthMonitor(): void {
   if (healthCheckTimer) return
 
   healthCheckTimer = setInterval(async () => {
-    const alive = await isPortListening(getProxyPort())
+    const alive = await isProxyAlive()
     if (!alive) {
-      logToFile('warn', 'Proxy port unreachable, attempting takeover...')
+      logToFile('warn', 'Proxy health check failed (port unresponsive or process stopped), attempting takeover...')
       stopHealthMonitor()
       try {
         const router = await tryStartRouter()
@@ -66,13 +89,12 @@ function startHealthMonitor(): void {
           routerInstance = router
           logToFile('info', 'Successfully took over as primary router instance.')
         } else {
-          // Another instance beat us to it — resume monitoring
-          logToFile('info', 'Another instance started the router first, resuming health monitor.')
+          // Another instance beat us — resume monitoring
+          logToFile('info', 'Another instance claimed the port, resuming health monitor.')
           startHealthMonitor()
         }
       } catch (err) {
         logToFile('error', `Failed to start router: ${err instanceof Error ? err.message : String(err)}`)
-        // Retry monitoring after a delay
         setTimeout(() => startHealthMonitor(), 10_000)
       }
     }
@@ -86,7 +108,7 @@ function stopHealthMonitor(): void {
   }
 }
 
-const OpenCodeGoMultiAuthPlugin: Plugin = async ({ client }, options = {}) => {
+const OpenCodeGoMultiAuthPlugin: Plugin = async ({ client }) => {
   // Enable plugin mode — suppress all console output, log to file only
   setPluginMode(true)
 
@@ -99,18 +121,36 @@ const OpenCodeGoMultiAuthPlugin: Plugin = async ({ client }, options = {}) => {
       dashboardPort: DEFAULT_CONFIG.dashboardPort,
     })
   } else {
-    logToFile('info', 'Router plugin initialized — secondary instance, health monitor active.', {
-      proxyPort: getProxyPort(),
-    })
-    startHealthMonitor()
+    // Check if the existing proxy is actually healthy
+    const alive = await isProxyAlive()
+    if (alive) {
+      logToFile('info', 'Router plugin initialized — secondary instance, existing proxy is healthy.', {
+        proxyPort: getProxyPort(),
+      })
+      startHealthMonitor()
+    } else {
+      // Port is held by a dead/stopped process — wait for OS to release it, then try again
+      logToFile('warn', 'Port bound but proxy unresponsive (possibly a stopped process). Waiting for port release...')
+      const retryDelay = 3000
+      await new Promise((resolve) => setTimeout(resolve, retryDelay))
+
+      const retryRouter = await tryStartRouter()
+      if (retryRouter) {
+        routerInstance = retryRouter
+        logToFile('info', 'Router started after port was released.')
+      } else {
+        logToFile('info', 'Port still held, starting health monitor to wait for release.')
+        startHealthMonitor()
+      }
+    }
   }
 
-  // Log to OpenCode's structured logger (only errors show in TUI)
+  // Log to OpenCode's structured logger
   await client.app.log({
     body: {
       service: 'opencode-go-multi-auth',
       level: 'info',
-      message: router
+      message: routerInstance
         ? 'Multi-auth router started.'
         : 'Multi-auth router connected (secondary).',
     },

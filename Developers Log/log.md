@@ -289,4 +289,31 @@ Now when ports are taken, the Promise rejects with `EADDRINUSE`, which is caught
 
 - Committed: `fix: add health monitor for secondary instances to auto-restart proxy when primary exits`
 
+### Follow-up: False "Proxy Unreachable" + Console Noise
 
+**Problems:**
+1. Health monitor used `fetch('http://localhost:18905/v1/models')` — that endpoint doesn't exist on the proxy server, so every check returned "unreachable" even when the proxy was running fine.
+2. All log output (info, warn, error) went to `console` via Winston's Console transport, polluting the opencode TUI.
+
+**Fixes (inspired by `opencode-multi-auth-codex` reference repo):**
+
+1. **TCP port probe** — replaced HTTP fetch with `net.Socket` TCP connection test:
+   ```typescript
+   function isPortListening(port: number, timeoutMs = 2000): Promise<boolean> {
+     const socket = new net.Socket()
+     socket.connect(port, '127.0.0.1')
+     // connect event = alive, error/timeout = dead
+   }
+   ```
+   This is protocol-agnostic — if the port accepts TCP connections, the proxy is alive.
+
+2. **Plugin-mode logger** — added `setPluginMode(true)` which:
+   - Removes Console transport from Winston (file-only logging to `~/.opencode/router.log`)
+   - Added `logToFile()` helper for direct file logging without console output
+   - Replaced all `console.log/warn/error` across router, proxy, header-passthrough, and ntfy modules
+
+3. **Standalone mode** preserved — `printSetupInstructions()` (the ASCII box) still uses `console.log` but is gated by `!getPluginMode()`, so it only shows when running via `npm start` / `opencode-go-router` CLI.
+
+**Files changed:** `logger.ts`, `opencode-plugin.ts`, `router/index.ts`, `proxy/header-passthrough.ts`, `notification/ntfy.ts`
+
+- Committed: `fix: use TCP port probe for health checks, route all logs to file when running as plugin`
