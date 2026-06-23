@@ -1,10 +1,8 @@
 export function generateProviderConfig(proxyPort: number): Record<string, unknown> {
   return {
-    'opencode-go-router': {
-      type: 'native',
-      url: `http://localhost:${proxyPort}`,
-      settings: {
-        apiKey: 'router-managed',
+    'opencode-go': {
+      options: {
+        baseURL: `http://localhost:${proxyPort}`,
       },
     },
   }
@@ -16,26 +14,22 @@ export function printSetupInstructions(proxyPort: number, dashboardPort: number)
 ║         OpenCode Go Router — Setup Guide            ║
 ╠══════════════════════════════════════════════════════╣
 ║                                                      ║
-║  1. OpenCode is configured to use this router as     ║
-║     your Go API provider.                            ║
+║  1. Add this to ~/.opencode/opencode.json:          ║
 ║                                                      ║
-║  2. Configure OpenCode to point to the proxy:        ║
-║                                                      ║
-║     In ~/.opencode/config.json or opencode.json:     ║
 ║     {                                                ║
 ║       "provider": {                                  ║
-║         "opencode-go-router": {                      ║
-║           "type": "native",                          ║
-║           "url": "http://localhost:${proxyPort}",         ║
-║           "settings": {}                             ║
+║         "opencode-go": {                             ║
+║           "options": {                               ║
+║             "baseURL": "http://localhost:${proxyPort}"  ║
+║           }                                          ║
 ║         }                                            ║
 ║       }                                              ║
 ║     }                                                ║
 ║                                                      ║
-║  3. Dashboard is available at:                       ║
+║  2. Dashboard is available at:                       ║
 ║     http://localhost:${dashboardPort}                    ║
 ║                                                      ║
-║  4. Add your Go API keys via the Dashboard.          ║
+║  3. Add your Go API keys via the Dashboard.          ║
 ║                                                      ║
 ╚══════════════════════════════════════════════════════╝
 `)

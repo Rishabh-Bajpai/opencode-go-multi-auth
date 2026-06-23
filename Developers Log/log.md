@@ -185,3 +185,57 @@
 - Rolling window calculation verified: $50/60 → no cooldown; $65/60 with 11 entries over 10 days → ~528 hours (22 days, matching the rolling window calculation)
 - End-to-end test: dashboard serves status, proxy forwards to upstream, logs display properly
 - `repos/` excluded from git tracking (reference clones only)
+
+---
+
+## 2026-06-23 — Session 6: Enhanced Dashboard — Structured Log Viewer, Key Toggle, Filters
+
+### What was done
+
+**1. Key enable/disable toggle**
+- Added `'disabled'` to `KeyStatus` type
+- `KeyManager.toggleKey(id)` — flips between active/disabled
+- `getActiveKeys()` now skips disabled keys
+- `PUT /api/keys/:id/toggle` dashboard API endpoint
+- Frontend: toggle switch per key in key management panel
+
+**2. Structured log emission**
+- Proxy now emits every log entry with structured `meta`:
+  - `method`, `path`, `statusCode`, `keyAlias`, `keyId`, `duration`, `tokens` (full breakdown), `cost`
+- Old format: `"POST /chat/completions -> 200 via "key" (150ms)"`
+- New format: `"POST /chat/completions"` with all detail in `meta` object
+
+**3. Enhanced log viewer**
+- 9-column grid rendering: Time | Level | Method | Path | Status | Key | Duration | Tokens (i:o:cr:cw:r) | Cost
+- Color-coded status codes (green=2xx, yellow=3xx, red=4xx+)
+- Token breakdown badges: `i:500 o:1200 cr:50 cw:10 r:0`
+- Hover highlighting on log rows
+
+**4. Log filters**
+- Path text filter (real-time filtering on existing + incoming logs)
+- Status code text filter
+- Key alias dropdown (populated from current keys)
+- Level dropdown (info/warn/error/debug)
+- Pause/resume toggle (buffers logs while paused, replays on resume)
+- Clear button
+
+**5. Visual updates**
+- Disabled keys at 50% opacity in both key list and status ledger
+- Disabled health indicator (gray dot)
+- Quota bar at 0% for disabled keys
+- `status=disabled` badge styling
+
+### Files changed
+- `src/router/types.ts` — Added `'disabled'` KeyStatus
+- `src/router/key-manager.ts` — Added `toggleKey()`, disabled-aware `getActiveKeys()`
+- `src/proxy/server.ts` — Structured log meta emission
+- `src/dashboard/server.ts` — Added toggle endpoint, `enabled` field in API responses
+- `src/dashboard/public/index.html` — Filter controls, pause checkbox
+- `src/dashboard/public/app.js` — Rewritten with 9-column log rendering, filters, toggle handler
+- `src/dashboard/public/styles.css` — New styles: toggle switch, log grid, filter bar, disabled states
+
+### Verification
+- `npm run build` — clean compilation
+- Toggle API tested: key flips active ↔ disabled, other keys unaffected
+- Structured logs verified: `POST /chat/completions` → status=404, key=rishabhbajpai24, dur=147, tokens=null
+- Dashboard HTML loads, filters render, WebSocket connects

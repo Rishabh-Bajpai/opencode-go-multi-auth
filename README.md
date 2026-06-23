@@ -65,21 +65,21 @@ Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser
 
 ### 5. Configure OpenCode CLI
 
-Edit your OpenCode config file (typically `~/.opencode/config.json` or `opencode.json` in your project) to point to the router:
+Add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.opencode/opencode.json`:
 
 ```json
 {
   "provider": {
-    "opencode-go-router": {
-      "type": "native",
-      "url": "http://localhost:18905",
-      "settings": {}
+    "opencode-go": {
+      "options": {
+        "baseURL": "http://localhost:18905"
+      }
     }
   }
 }
 ```
 
-Then run OpenCode normally. All API calls to `https://opencode.ai/zen/go/v1/*` will be routed through the multi-account proxy.
+Then run OpenCode normally. All API calls to the Go API will be routed through the multi-account proxy at `http://localhost:18905`, which forwards them to `https://opencode.ai/zen/go/v1/*` with managed key rotation.
 
 ## Usage
 
