@@ -22,6 +22,7 @@ import { SessionAffinityStore } from './session-affinity.js'
 export interface ProxyServerConfig {
   port: number
   upstreamUrl: string
+  upstreamUrlZen: string
   requestTimeoutMs: number
   upstreamHungTimeoutMs: number
   fallbackCooldownMs: number
@@ -110,8 +111,13 @@ export class ProxyServer {
   }
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const upstream = new URL(this.config.upstreamUrl)
     const targetPath = req.url?.split('?')[0] || '/'
+    const isZenRequest = targetPath === '/zen' || targetPath.startsWith('/zen/')
+    const upstreamUrl = isZenRequest ? this.config.upstreamUrlZen : this.config.upstreamUrl
+    const upstream = new URL(upstreamUrl)
+    if (isZenRequest && req.url) {
+      req.url = req.url.replace(/^\/zen(\/|$)/, '/')
+    }
     const headers = req.headers as Record<string, string | string[] | undefined>
     const body = await this.readBody(req)
     if (body === null) {
@@ -196,7 +202,7 @@ export class ProxyServer {
         : undefined
 
       try {
-        const fetchUrl = buildUpstreamUrl(this.config.upstreamUrl, req.url)
+        const fetchUrl = buildUpstreamUrl(upstreamUrl, req.url)
         const upstreamRes = await fetch(fetchUrl, {
           method: req.method ?? 'GET',
           headers: upstreamHeaders,

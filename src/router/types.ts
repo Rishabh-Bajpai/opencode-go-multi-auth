@@ -72,6 +72,7 @@ export interface KeySelection {
 
 export interface RouterConfig {
   upstreamUrl: string
+  upstreamUrlZen: string
   dashboardPort: number
   proxyPort: number
   cooldownMs: number
@@ -140,6 +141,7 @@ export function getRoutingStrategyInfo(strategy: RoutingStrategy): RoutingStrate
 
 export const DEFAULT_CONFIG: RouterConfig = {
   upstreamUrl: 'https://opencode.ai/zen/go/v1',
+  upstreamUrlZen: 'https://opencode.ai/zen/v1',
   dashboardPort: 18904,
   proxyPort: 18905,
   cooldownMs: 5 * 60 * 60 * 1000,
