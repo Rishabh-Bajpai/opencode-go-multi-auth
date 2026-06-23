@@ -154,10 +154,11 @@ export class DashboardServer {
   }
 
   async start(): Promise<http.Server> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.server = this.app.listen(this.port, () => {
         resolve(this.server!)
       })
+      this.server.on('error', (err) => reject(err))
     })
   }
 

@@ -25,6 +25,10 @@ export interface RouterInstance {
   shutdown: () => Promise<void>
 }
 
+export interface RouterBootstrapOptions {
+  suppressSetupInstructions?: boolean
+}
+
 function loadEnvConfig(): Partial<RouterConfig> {
   return {
     upstreamUrl: process.env.UPSTREAM_URL || DEFAULT_CONFIG.upstreamUrl,
@@ -40,7 +44,10 @@ function loadEnvConfig(): Partial<RouterConfig> {
   }
 }
 
-export async function createRouter(config?: Partial<RouterConfig>): Promise<RouterInstance> {
+export async function createRouter(
+  config?: Partial<RouterConfig>,
+  options: RouterBootstrapOptions = {},
+): Promise<RouterInstance> {
   const envConfig = loadEnvConfig()
   const mergedConfig: RouterConfig = { ...DEFAULT_CONFIG, ...envConfig, ...config }
 
@@ -97,7 +104,9 @@ export async function createRouter(config?: Partial<RouterConfig>): Promise<Rout
   logStream.emit(logger, 'info', `Upstream: ${mergedConfig.upstreamUrl}`)
   logStream.emit(logger, 'info', `Loaded ${storedKeys.length} API key(s)`)
 
-  printSetupInstructions(mergedConfig.proxyPort, mergedConfig.dashboardPort)
+  if (!options.suppressSetupInstructions) {
+    printSetupInstructions(mergedConfig.proxyPort, mergedConfig.dashboardPort)
+  }
 
   return {
     keyManager,

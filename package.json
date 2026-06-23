@@ -1,7 +1,7 @@
 {
   "name": "opencode-go-multi-auth",
-"version": "0.2.0",
-"description": "Multi-account router plugin for OpenCode Go API subscriptions",
+  "version": "0.2.0",
+  "description": "Multi-account router plugin for OpenCode Go API subscriptions",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
@@ -11,10 +11,16 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./plugin": {
+      "types": "./dist/opencode-plugin.d.ts",
+      "import": "./dist/opencode-plugin.js",
+      "default": "./dist/opencode-plugin.js"
     }
   },
   "files": [
     "dist",
+    ".opencode-plugin/plugin.json",
     "README.md",
     "LICENSE"
   ],
@@ -26,6 +32,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@opencode-ai/plugin": "^1.17.9",
     "@opencode-ai/sdk": "^1.17.0",
     "express": "^4.21.0",
     "winston": "^3.15.0",
@@ -39,7 +46,13 @@
     "typescript": "^5.6.0"
   },
   "peerDependencies": {
+    "@opencode-ai/plugin": "^1.17.9",
     "@opencode-ai/sdk": "^1.17.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=18"

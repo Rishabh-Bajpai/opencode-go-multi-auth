@@ -1,6 +1,6 @@
 # OpenCode Go Multi-Account Router
 
-A native TypeScript proxy server that pools multiple OpenCode Go API subscriptions into a single endpoint. It routes requests across accounts using cache-aware or load-spreading strategies, with a persistent control-room dashboard for key management, usage analytics, and live observability.
+A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCode Go API subscriptions into a single endpoint. It routes requests across accounts using cache-aware or load-spreading strategies, auto-starts with OpenCode in plugin mode, and includes a persistent control-room dashboard for key management, usage analytics, and live observability.
 
 ## Features
 
@@ -14,7 +14,8 @@ A native TypeScript proxy server that pools multiple OpenCode Go API subscriptio
 - **Local Web UI Control Room** — Strategy explainer, key deck with inline editing, live usage ledger, routing tape with per-request route reasons and session IDs.
 - **Secure Key Storage** — AES-256-GCM encrypted at rest using PBKDF2-derived key from machine identity.
 - **Push Notifications** — Optional ntfy notifications for exhaustion, circuit breaker trips, and proactive switches.
-- **Standalone or Library** — Use as a CLI server or import programmatically.
+- **Auto-Starting OpenCode Plugin** — Install as an OpenCode plugin so the proxy and dashboard start with OpenCode automatically.
+- **Standalone or Library** — Keep a CLI/server mode for debugging, fallback use, or external automation.
 
 ## Prerequisites
 
@@ -24,16 +25,67 @@ A native TypeScript proxy server that pools multiple OpenCode Go API subscriptio
 
 ## Installation
 
-### 1. Clone and build
+### Plugin install (recommended)
+
+Install the plugin so OpenCode starts the router automatically when it boots.
+
+If this package is installed from npm:
+
+```bash
+opencode plugin opencode-go-multi-auth/plugin --global
+```
+
+If you are using this repo from source:
 
 ```bash
 git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
 cd opencode-go-multi-auth
 npm install
 npm run build
+mkdir -p ~/.config/opencode/plugins
+cat > ~/.config/opencode/plugins/opencode-go-multi-auth.js <<'EOF'
+export { default, server, pluginModule } from "/absolute/path/to/opencode-go-multi-auth/dist/opencode-plugin.js"
+EOF
 ```
 
-### 2. Run the server
+Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your local clone.
+
+### OpenCode config
+
+Add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.opencode/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-go-multi-auth/plugin"],
+  "provider": {
+    "opencode-go": {
+      "options": {
+        "baseURL": "http://localhost:18905"
+      }
+    }
+  }
+}
+```
+
+If you installed the plugin by copying the built file into `~/.config/opencode/plugins/`, you can leave `plugin` out entirely because local plugin files are auto-loaded.
+
+Then start OpenCode normally. The plugin will boot the proxy at `http://localhost:18905` and the dashboard at `http://localhost:18904` automatically.
+
+### Open the Dashboard
+
+Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser.
+
+### Add your Go API keys
+
+1. Click **Add Key**
+2. Paste your OpenCode Go API key (found in your OpenCode account settings)
+3. Optionally give it an alias, priority, and weight
+4. Repeat for each Go account you want to pool
+
+### Standalone mode (fallback)
+
+If you do not want plugin mode, you can still run the router manually:
 
 ```bash
 npm start
@@ -46,43 +98,7 @@ npm install -g .
 opencode-go-router
 ```
 
-You should see output like:
-
-```
-Dashboard UI: http://localhost:18904
-Proxy server: http://localhost:18905
-Upstream: https://opencode.ai/zen/go/v1
-Loaded 0 API key(s)
-```
-
-### 3. Open the Dashboard
-
-Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser.
-
-### 4. Add your Go API keys
-
-1. Click **Add Key**
-2. Paste your OpenCode Go API key (found in your OpenCode account settings)
-3. Optionally give it an alias, priority, and weight
-4. Repeat for each Go account you want to pool
-
-### 5. Configure OpenCode CLI
-
-Add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.opencode/opencode.json`:
-
-```json
-{
-  "provider": {
-    "opencode-go": {
-      "options": {
-        "baseURL": "http://localhost:18905"
-      }
-    }
-  }
-}
-```
-
-Then run OpenCode normally. All API calls to the Go API will be routed through the multi-account proxy at `http://localhost:18905`, which forwards them to `https://opencode.ai/zen/go/v1/*` with managed key rotation.
+In standalone mode you must start the router yourself after reboot. Plugin mode avoids this.
 
 ## Routing Strategies
 
@@ -166,13 +182,14 @@ Both are configurable via environment variables.
 ```
 
 1. OpenCode CLI points to the proxy at `localhost:18905`
-2. Proxy selects an API key using the active strategy (with session stickiness as a pre-filter)
-3. Request is forwarded to the upstream OpenCode Go API
-4. On 402/429: key goes on dynamic cooldown, next key is tried
-5. On 5xx: circuit breaker tracks consecutive errors, trips after threshold
-6. Token usage is parsed from full JSON or SSE streaming responses and tracked against each key
-7. Caching and session headers (`X-Session-Id`, `prompt_cache_key`, `cache_control`) pass through unmodified
-8. All decisions are logged with routing reasons and streamed to the dashboard in real time
+2. OpenCode auto-loads the plugin at startup (plugin mode) and the plugin boots the proxy/dashboard in-process
+3. Proxy selects an API key using the active strategy (with session stickiness as a pre-filter)
+4. Request is forwarded to the upstream OpenCode Go API
+5. On 402/429: key goes on dynamic cooldown, next key is tried
+6. On 5xx: circuit breaker tracks consecutive errors, trips after threshold
+7. Token usage is parsed from full JSON or SSE streaming responses and tracked against each key
+8. Caching and session headers (`X-Session-Id`, `prompt_cache_key`, `cache_control`) pass through unmodified
+9. All decisions are logged with routing reasons and streamed to the dashboard in real time
 
 ## Security
 
@@ -214,6 +231,13 @@ npm run build
 # Clean build output
 npm run clean
 ```
+
+## Plugin Notes
+
+- OpenCode plugin mode is the preferred installation path.
+- The plugin starts the router once per OpenCode process and reuses an existing router if the configured ports are already occupied.
+- The plugin does not replace the built-in `opencode-go` provider. It auto-starts the proxy; the provider still needs the one-time `baseURL` override in `opencode.json`.
+- Standalone CLI mode remains available for debugging, system service setups, or running the router outside OpenCode.
 
 ## Programmatic Usage
 

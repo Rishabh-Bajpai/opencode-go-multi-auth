@@ -1,0 +1,5 @@
+{
+  "name": "opencode-go-multi-auth",
+  "version": "0.2.0",
+  "description": "Multi-account OpenCode Go router plugin with auto-starting proxy and dashboard."
+}

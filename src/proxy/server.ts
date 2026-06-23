@@ -89,8 +89,9 @@ export class ProxyServer {
   }
 
   async start(): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => this.handleRequest(req, res))
+      this.server.on('error', (err) => reject(err))
       this.server.listen(this.config.port, () => resolve())
     })
   }
