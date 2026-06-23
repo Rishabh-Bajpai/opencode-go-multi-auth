@@ -165,6 +165,8 @@ Copy `.env.example` to `.env` and adjust as needed:
 | `LOG_LEVEL` | `info` | Log level: `error`, `warn`, `info`, `debug` |
 | `CONFIG_DIR` | `~/.opencode` | Directory for config, encrypted key storage, and usage data |
 | `NTFY_URL` | — | Optional ntfy URL for push notifications (e.g., `https://ntfy.sh/mytopic`). Leave empty to disable. |
+| `REQUEST_TIMEOUT_MS` | `0` | Wall-clock cap on the upstream HTTP round-trip in ms. `0` = disabled, matching OpenCode's no-timeout default for the opencode-go provider. |
+| `UPSTREAM_HUNG_TIMEOUT_MS` | `0` | Safety net that aborts the upstream fetch if no response is received at all within this window. `0` = disabled. Cleared as soon as the upstream starts sending bytes. |
 
 ### Ports
 

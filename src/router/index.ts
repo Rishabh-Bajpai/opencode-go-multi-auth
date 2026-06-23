@@ -30,6 +30,13 @@ export interface RouterBootstrapOptions {
   suppressSetupInstructions?: boolean
 }
 
+function readPositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return Math.floor(parsed)
+}
+
 function loadEnvConfig(): Partial<RouterConfig> {
   return {
     upstreamUrl: process.env.UPSTREAM_URL || DEFAULT_CONFIG.upstreamUrl,
@@ -42,6 +49,8 @@ function loadEnvConfig(): Partial<RouterConfig> {
     configDir: process.env.CONFIG_DIR || DEFAULT_CONFIG.configDir,
     ntfyUrl: process.env.NTFY_URL || DEFAULT_CONFIG.ntfyUrl,
     proactiveSwitchThreshold: Number(process.env.PROACTIVE_SWITCH_THRESHOLD) || DEFAULT_CONFIG.proactiveSwitchThreshold,
+    requestTimeoutMs: readPositiveInt(process.env.REQUEST_TIMEOUT_MS, DEFAULT_CONFIG.requestTimeoutMs),
+    upstreamHungTimeoutMs: readPositiveInt(process.env.UPSTREAM_HUNG_TIMEOUT_MS, DEFAULT_CONFIG.upstreamHungTimeoutMs),
   }
 }
 
@@ -100,6 +109,8 @@ export async function createRouter(
       port: mergedConfig.proxyPort,
       upstreamUrl: mergedConfig.upstreamUrl,
       proactiveSwitchThreshold: mergedConfig.proactiveSwitchThreshold,
+      requestTimeoutMs: mergedConfig.requestTimeoutMs,
+      upstreamHungTimeoutMs: mergedConfig.upstreamHungTimeoutMs,
     },
     keyManager,
     circuitBreaker,

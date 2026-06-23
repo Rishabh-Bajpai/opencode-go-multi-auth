@@ -23,6 +23,8 @@ export interface ProxyServerConfig {
   port: number
   upstreamUrl: string
   proactiveSwitchThreshold: number
+  requestTimeoutMs: number
+  upstreamHungTimeoutMs: number
 }
 
 interface RequestPreparation {
@@ -118,6 +120,28 @@ export class ProxyServer {
     const maxAttempts = totalKeys || 1
     let lastError = 'All API keys exhausted'
 
+    const upstreamAbortController = new AbortController()
+    let upstreamClientCloseHandler: (() => void) | null = null
+    const onClientClose = () => {
+      if (!upstreamAbortController.signal.aborted) {
+        upstreamAbortController.abort(new Error('client disconnected'))
+      }
+    }
+    if (!res.closed) {
+      res.once('close', onClientClose)
+      upstreamClientCloseHandler = onClientClose
+    } else {
+      onClientClose()
+    }
+    if (this.config.requestTimeoutMs > 0) {
+      const requestTimeoutSignal = AbortSignal.timeout(this.config.requestTimeoutMs)
+      requestTimeoutSignal.addEventListener('abort', () => {
+        if (!upstreamAbortController.signal.aborted) {
+          upstreamAbortController.abort(requestTimeoutSignal.reason)
+        }
+      })
+    }
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const decision = this.selectKey(sessionKey, attemptedKeyIds)
 
@@ -152,6 +176,13 @@ export class ProxyServer {
       }
 
       const startTime = Date.now()
+      const upstreamHungTimer = this.config.upstreamHungTimeoutMs > 0
+        ? setTimeout(() => {
+            if (!upstreamAbortController.signal.aborted) {
+              upstreamAbortController.abort(new Error('upstream hung (no response within UPSTREAM_HUNG_TIMEOUT_MS)'))
+            }
+          }, this.config.upstreamHungTimeoutMs)
+        : undefined
 
       try {
         const fetchUrl = buildUpstreamUrl(this.config.upstreamUrl, req.url)
@@ -159,8 +190,9 @@ export class ProxyServer {
           method: req.method ?? 'GET',
           headers: upstreamHeaders,
           body: req.method !== 'GET' && req.method !== 'HEAD' ? prepared.body : undefined,
-          signal: AbortSignal.timeout(60_000),
+          signal: upstreamAbortController.signal,
         })
+        if (upstreamHungTimer) clearTimeout(upstreamHungTimer)
 
         const duration = Date.now() - startTime
         const responseTextPromise = upstreamRes.clone().text().catch(() => '')
@@ -295,6 +327,7 @@ export class ProxyServer {
         })
         return
       } catch (err) {
+        if (upstreamHungTimer) clearTimeout(upstreamHungTimer)
         lastError = err instanceof Error ? err.message : String(err)
         this.keyManager.recordRequest(key.id, {
           statusCode: 0,
@@ -314,6 +347,13 @@ export class ProxyServer {
           routeReason: reason,
         })
       }
+    }
+
+    if (upstreamClientCloseHandler) {
+      res.removeListener('close', upstreamClientCloseHandler)
+    }
+    if (!upstreamAbortController.signal.aborted) {
+      upstreamAbortController.abort()
     }
 
     res.writeHead(503, { 'content-type': 'application/json' })

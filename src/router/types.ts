@@ -82,6 +82,8 @@ export interface RouterConfig {
   strategy: RoutingStrategy
   ntfyUrl: string
   proactiveSwitchThreshold: number
+  requestTimeoutMs: number
+  upstreamHungTimeoutMs: number
 }
 
 export const ROUTING_STRATEGIES: RoutingStrategyInfo[] = [
@@ -162,6 +164,8 @@ export const DEFAULT_CONFIG: RouterConfig = {
   strategy: RoutingStrategy.PRIORITY_FAILOVER,
   ntfyUrl: '',
   proactiveSwitchThreshold: 0.95,
+  requestTimeoutMs: 0,
+  upstreamHungTimeoutMs: 0,
 }
 
 export enum CircuitState {
