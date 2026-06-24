@@ -1141,7 +1141,7 @@ input, select, textarea {
 .log-spacer-top, .log-spacer-bot { width: 100%; }
 
 .log-row {
-  height: 32px;
+  min-height: 32px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.10s;

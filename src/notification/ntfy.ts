@@ -9,9 +9,13 @@ const PRIORITY_MAP: Record<string, number> = {
 }
 
 export class NtfyNotifier {
-  private readonly url: string
+  private url: string
 
   constructor(ntfyUrl?: string) {
+    this.url = (ntfyUrl ?? '').replace(/\/+$/, '')
+  }
+
+  updateUrl(ntfyUrl: string): void {
     this.url = (ntfyUrl ?? '').replace(/\/+$/, '')
   }
 

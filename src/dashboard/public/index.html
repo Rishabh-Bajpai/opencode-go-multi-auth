@@ -273,13 +273,29 @@
           <div class="config-table" id="config-table"></div>
         </div>
 
+        <div class="card" id="settings-ntfy" style="margin-top: 16px;">
+          <div class="card-head">
+            <h3>Notifications</h3>
+            <span class="ntfy-status" style="font-size: 11px; font-weight: 600;">Notifications disabled</span>
+          </div>
+          <div class="card-body">
+            <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 13px;">
+              Set an <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color: var(--accent);">ntfy.sh</a> topic URL to receive push notifications when keys are exhausted or circuit breakers trip. Updated instantly — no restart needed.
+            </p>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input class="input input-mono ntfy-input" type="text" placeholder="https://ntfy.sh/mytopic" style="flex: 1;" autocomplete="off">
+              <button class="btn btn-primary ntfy-save">Save</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card" style="margin-top: 16px;">
           <div class="card-head">
             <h3>OpenCode integration</h3>
           </div>
           <div class="card-body">
             <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 13px;">
-              Add this block to <code style="font-family: var(--font-mono);">~/.opencode/opencode.json</code> to route Go API calls through the proxy:
+              Add this block to <code style="font-family: var(--font-mono);">~/.opencode/opencode.json</code> to route Go and Zen API calls through the proxy:
             </p>
             <textarea class="textarea" readonly id="provider-config"></textarea>
             <div class="config-actions">

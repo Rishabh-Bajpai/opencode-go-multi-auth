@@ -133,6 +133,7 @@ export async function createRouter(
     logStream,
     secureStore,
     configStore,
+    notifier,
   )
 
   await proxyServer.start()

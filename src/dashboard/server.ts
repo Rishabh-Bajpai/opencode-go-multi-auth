@@ -8,6 +8,7 @@ import type { QuotaTracker } from '../router/quota-tracker.js'
 import { LogStream } from '../logging/log-stream.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
+import { NtfyNotifier } from '../notification/ntfy.js'
 import { OpenCodeUsageStore } from '../storage/opencode-usage-store.js'
 import {
   RoutingStrategy,
@@ -33,6 +34,7 @@ export class DashboardServer {
     private logStream: LogStream,
     private secureStore: SecureStore,
     private configStore: ConfigStore,
+    private notifier: NtfyNotifier,
   ) {
     this.port = port
     this.openCodeUsageStore = new OpenCodeUsageStore()
@@ -174,6 +176,22 @@ export class DashboardServer {
       }
       this.configStore.set('strategy', strategy)
       res.json({ strategy })
+    })
+
+    this.app.get('/api/config', (_req, res) => {
+      const config = this.configStore.getAll()
+      res.json({ ntfyUrl: config.ntfyUrl })
+    })
+
+    this.app.put('/api/config', (req, res) => {
+      const { ntfyUrl } = req.body ?? {}
+      if (typeof ntfyUrl !== 'string') {
+        res.status(400).json({ error: 'ntfyUrl must be a string' })
+        return
+      }
+      this.configStore.set('ntfyUrl', ntfyUrl as any)
+      this.notifier.updateUrl(ntfyUrl)
+      res.json({ ntfyUrl })
     })
 
     this.app.get('/api/status', (_req, res) => {

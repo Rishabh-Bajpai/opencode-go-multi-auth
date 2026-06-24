@@ -113,6 +113,8 @@ const api = {
   reorderKeys(order) { return this.req('/api/keys/reorder', { method: 'PUT', body: { order } }); },
   resetCooldown(id) { return this.req(`/api/keys/${id}/reset-cooldown`, { method: 'POST' }); },
   removeKey(id) { return this.req(`/api/keys/${id}`, { method: 'DELETE' }); },
+  config() { return this.req('/api/config'); },
+  setConfig(payload) { return this.req('/api/config', { method: 'PUT', body: payload }); },
   recentLogs() { return this.req('/api/logs'); },
 };
 
@@ -1708,7 +1710,7 @@ function initTokensPage() {
 async function renderSettings() {
   const table = $('#config-table');
   if (!table) return;
-  const [status, current] = await Promise.all([api.status(), api.currentStrategy()]);
+  const [status, current, cfg] = await Promise.all([api.status(), api.currentStrategy(), api.config()]);
   const ports = window.location.port ? `:${window.location.port}` : '';
   const baseUrl = `${location.protocol}//${location.hostname}${ports === ':18904' ? ':18905' : ports}`;
   const proxyHost = `${location.protocol}//${location.hostname}:18905`;
@@ -1728,9 +1730,37 @@ async function renderSettings() {
     <div class="config-val">${escapeHtml(v)}</div>
   `).join('');
 
+  const ntfyRow = document.getElementById('settings-ntfy');
+  if (ntfyRow) {
+    const input = ntfyRow.querySelector('.ntfy-input');
+    const statusEl = ntfyRow.querySelector('.ntfy-status');
+    const saveBtn = ntfyRow.querySelector('.ntfy-save');
+    if (input) input.value = cfg.ntfyUrl || '';
+    if (statusEl) {
+      statusEl.textContent = cfg.ntfyUrl ? 'Notifications enabled' : 'Notifications disabled';
+      statusEl.style.color = cfg.ntfyUrl ? 'var(--green)' : 'var(--text-muted)';
+    }
+    if (saveBtn) {
+      saveBtn.onclick = async () => {
+        const url = input ? input.value.trim() : '';
+        try {
+          await api.setConfig({ ntfyUrl: url });
+          if (statusEl) {
+            statusEl.textContent = url ? 'Notifications enabled' : 'Notifications disabled';
+            statusEl.style.color = url ? 'var(--green)' : 'var(--text-muted)';
+          }
+          toast('Notification URL updated', 'success');
+        } catch (err) {
+          toast('Failed to save: ' + (err instanceof Error ? err.message : String(err)), 'error');
+        }
+      };
+    }
+  }
+
   $('#provider-config').value = JSON.stringify({
     provider: {
       'opencode-go': { options: { baseURL: proxyHost } },
+      'opencode-zen': { api: 'opencode-go', options: { baseURL: `${proxyHost}/zen` } },
     },
   }, null, 2);
 
