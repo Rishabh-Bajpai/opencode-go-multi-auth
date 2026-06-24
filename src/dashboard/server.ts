@@ -71,6 +71,10 @@ export class DashboardServer {
   private setupRoutes(): void {
     this.app.use(express.static(PUBLIC_DIR))
 
+    this.app.get('/favicon.ico', (_req, res) => {
+      res.redirect('/favicon.svg')
+    })
+
     this.app.get('/healthz', (_req, res) => {
       res.json({
         ok: true,

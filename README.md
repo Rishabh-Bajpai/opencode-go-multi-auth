@@ -1,6 +1,12 @@
 # OpenCode Go Multi-Account Router
 
-A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCode Go + Zen API subscriptions into a single endpoint. It routes requests across accounts using cache-aware or load-spreading strategies, auto-starts with OpenCode in plugin mode, and includes a persistent control-room dashboard for key management, usage analytics, and live observability.
+> **⚠️ Educational Purpose Only** — This project is provided for learning and educational purposes. It demonstrates how to build a multi-account proxy router for OpenCode Go and Zen API subscriptions. Users are responsible for complying with OpenCode's terms of service.
+
+A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCode Go + Zen API subscriptions into a single endpoint. Instead of manually swapping API keys between accounts when one runs out of quota, this router handles it automatically. It routes requests across accounts using cache-aware or load-spreading strategies, auto-starts with OpenCode in plugin mode, and includes a persistent control-room dashboard for key management, usage analytics, and live observability.
+
+> **Note for end users:** If you just want to use the router (not develop it), follow the [Installation](#installation) guide and ignore files like `restart-router.sh`, `AGENTS.md`, and `Developers Log/` — those are for project maintainers.
+
+> **💰 Support the project:** Use this referral link to [sign up for OpenCode Go](https://opencode.ai/go?ref=HF6N2D2RCR) and get **$5 free credit** to start. Every referral helps keep this project maintained.
 
 ## Features
 
@@ -28,17 +34,30 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 ## Installation
 
-### Plugin install (recommended)
+There are three ways to install the plugin. Pick whichever suits your workflow.
 
-Install the plugin so OpenCode starts the router automatically when OpenCode launches. This does not install an OS-level boot service by itself.
+### Option 1: Install directly from GitHub (no manual clone)
 
-If this package is installed from npm:
+This is the quickest path. The `prepare` script auto-builds the project during install.
 
 ```bash
+npm install -g https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
 opencode plugin opencode-go-multi-auth/plugin --global
 ```
 
-If you are using this repo from source:
+### Option 2: Clone and build locally
+
+```bash
+git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
+cd opencode-go-multi-auth
+npm install
+npm run build
+opencode plugin opencode-go-multi-auth/plugin --global
+```
+
+### Option 3: Plugins directory (manual)
+
+If the `opencode plugin` command does not work in your setup, copy the loader file manually:
 
 ```bash
 git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
@@ -55,7 +74,7 @@ Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your lo
 
 ### OpenCode config
 
-Add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.config/opencode/opencode.json`:
+After installing, add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -71,17 +90,12 @@ Add the proxy as a base URL override for the built-in `opencode-go` provider in 
 }
 ```
 
-If you installed the plugin by copying the built file into `~/.config/opencode/plugins/`, you can leave `plugin` out entirely because local plugin files are auto-loaded.
+If you used Option 3 (plugins directory), you can leave `plugin` out of the config — local plugin files in `~/.config/opencode/plugins/` are auto-loaded.
 
-Whenever you change this repo locally, rebuild before testing or reopening OpenCode:
+Then close any existing OpenCode sessions and open a fresh one. The plugin will start or reuse one shared local router daemon, which serves:
 
-```bash
-npm run build
-```
-
-Then fully close any existing OpenCode sessions and open a fresh one so the new plugin build is loaded.
-
-Then start OpenCode normally. The plugin will start or reuse one shared local router daemon, which serves the proxy at `http://localhost:18905` and the dashboard at `http://localhost:18904`.
+- **Proxy endpoint** — `http://localhost:18905`
+- **Dashboard** — `http://localhost:18904`
 
 ### Open the Dashboard
 
@@ -96,22 +110,29 @@ Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser
 
 ### Standalone mode (fallback)
 
-If you do not want plugin mode, you can still run the router manually:
+If you do not want plugin mode, you can still run the router manually using the global CLI:
+
+```bash
+opencode-go-router
+```
+
+Or from a local clone:
 
 ```bash
 npm start
 ```
 
-Or install globally:
-
-```bash
-npm install -g .
-opencode-go-router
-```
-
 In standalone mode you must start the router yourself after reboot. Plugin mode avoids manual startup when opening OpenCode, but it is not an OS boot service.
 
+Whenever you change the source locally, rebuild before restarting:
+
+```bash
+npm run build
+```
+
 ## Compatibility Notes
+
+> **Note:** This project has been tested on Linux. macOS has not been tested yet — if you run into issues, please open a GitHub issue.
 
 - Some OpenCode Go models use `/messages` with Anthropic-style auth. The proxy now forwards both `Authorization: Bearer ...` and `x-api-key` to maximize compatibility.
 - If a new model still fails, capture the exact model name and the `/messages` or `/chat/completions` path from the router log.

@@ -17,7 +17,8 @@
 # and matches the recorded PID. That keeps concurrent runs safe.
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-/home/rishabh/github_projects/opencode-go-multi-auth}"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+REPO_DIR="${REPO_DIR:-$SCRIPT_DIR}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-18904}"
 PROXY_PORT="${PROXY_PORT:-18905}"
 HEALTH_URL="http://127.0.0.1:${DASHBOARD_PORT}/healthz"

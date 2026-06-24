@@ -85,7 +85,7 @@ canonical recipe:
 PID=$(cat ~/.opencode/router.pid 2>/dev/null | jq -r .pid 2>/dev/null)
 [ -n "$PID" ] && kill "$PID" 2>/dev/null
 sleep 1
-cd /home/rishabh/github_projects/opencode-go-multi-auth
+cd "$(dirname "$(readlink -f "$0")")"
 nohup env OPENCODE_ROUTER_PLUGIN_MODE=1 node dist/bin.js > /dev/null 2>&1 &
 disown
 sleep 2
