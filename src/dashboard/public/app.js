@@ -571,7 +571,7 @@ function renderModelDonut() {
 // ---- Charts: token throughput over time -------------------------------
 
 let chartState = {
-  series: { input: [], output: [], cacheRead: [] },
+  series: { input: [], output: [], cacheRead: [], cacheWrite: [], reasoning: [] },
   maxPoints: 240,    // 4 minutes at 1s tick
 };
 
@@ -581,10 +581,10 @@ function pushChartPoint(entry) {
   if (!entry.timestamp) return;
   const ts = new Date(entry.timestamp).getTime();
   if (Number.isNaN(ts)) return;
-  if (t.input == null && t.output == null && t.cacheRead == null) return;
-  chartState.series.input.push({ t: ts, v: t.input || 0 });
-  chartState.series.output.push({ t: ts, v: t.output || 0 });
-  chartState.series.cacheRead.push({ t: ts, v: t.cacheRead || 0 });
+  if (t.input == null && t.output == null && t.cacheRead == null && t.cacheWrite == null && t.reasoning == null) return;
+  for (const key of Object.keys(chartState.series)) {
+    chartState.series[key].push({ t: ts, v: t[key] || 0 });
+  }
   const cutoff = Date.now() - 60 * 60 * 1000;
   for (const key of Object.keys(chartState.series)) {
     chartState.series[key] = chartState.series[key].filter((p) => p.t >= cutoff);
@@ -598,38 +598,67 @@ function renderOverviewChart() {
   const host = $('#overview-chart');
   if (!host) return;
   const series = chartState.series;
-  const all = [...series.input, ...series.output, ...series.cacheRead];
+  const all = [...series.input, ...series.output, ...series.cacheRead, ...series.cacheWrite, ...series.reasoning];
   if (all.length < 2) {
     host.innerHTML = `<div style="height: 220px; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; font-family: var(--font-mono);">Waiting for token activity…</div>`;
     return;
   }
-  host.innerHTML = lineChartSvg(series, { width: 560, height: 220, padding: { top: 8, right: 12, bottom: 24, left: 40 } });
+  host.innerHTML = stackedAreaChartSvg(series, { width: 560, height: 220, padding: { top: 8, right: 12, bottom: 24, left: 40 } });
 }
 
 const scheduleOverviewChart = rAFThrottle(() => {
   if (state.currentPage === 'overview') renderOverviewChart();
 });
 
-function lineChartSvg(series, opts) {
+function stackedAreaChartSvg(rawSeries, opts) {
   const { width, height, padding } = opts;
-  const all = [...series.input, ...series.output, ...series.cacheRead];
+  const all = [...rawSeries.input, ...rawSeries.output, ...rawSeries.cacheRead, ...rawSeries.cacheWrite, ...rawSeries.reasoning];
+  if (all.length < 2) return '';
   const tMin = Math.min(...all.map((p) => p.t));
   const tMax = Math.max(...all.map((p) => p.t));
-  const vMax = Math.max(1, ...all.map((p) => p.v));
+  const spanMs = Math.max(1, tMax - tMin);
+  const bucketMs = Math.max(10_000, Math.ceil(spanMs / 48));
+  const bucketCount = Math.ceil(spanMs / bucketMs);
+  const buckets = [];
+  for (let i = 0; i < bucketCount; i++) {
+    const start = tMin + i * bucketMs;
+    const end = start + bucketMs;
+    const bucket = { t: start, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+    for (const key of Object.keys(rawSeries)) {
+      const pts = rawSeries[key].filter((p) => p.t >= start && p.t < end);
+      bucket[key] = pts.reduce((s, p) => s + p.v, 0);
+    }
+    buckets.push(bucket);
+  }
+
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
-  const spanMs = Math.max(1, tMax - tMin);
   const x = (t) => padding.left + ((t - tMin) / spanMs) * innerW;
+  const bucketW = (spanMs > 0 ? (bucketMs / spanMs) * innerW : 0);
+
+  // Calculate stacked values per bucket
+  const stackKeys = ['cacheRead', 'input', 'output', 'cacheWrite', 'reasoning'];
+  const stackColors = ['var(--purple)', 'var(--accent)', 'var(--green)', 'var(--yellow)', 'var(--red)'];
+  const stackTops = buckets.map(() => 0);
+  let vMax = 0;
+  for (const k of stackKeys) {
+    for (let i = 0; i < buckets.length; i++) {
+      stackTops[i] += buckets[i][k];
+    }
+    vMax = Math.max(vMax, ...stackTops);
+  }
+  vMax = Math.max(1, vMax * 1.1);
+
   const y = (v) => padding.top + innerH - (v / vMax) * innerH;
 
-  // Horizontal grid lines (y-axis)
+  // Horizontal grid lines
   const hGrid = [];
   for (let i = 0; i <= 4; i++) {
     const yy = padding.top + (innerH / 4) * i;
     hGrid.push(`<line x1="${padding.left}" y1="${yy}" x2="${width - padding.right}" y2="${yy}"/>`);
   }
 
-  // Compute tick interval for x-axis based on time span
+  // X-axis ticks
   let tickIntervalMs;
   if (spanMs <= 120_000) tickIntervalMs = 10_000;
   else if (spanMs <= 300_000) tickIntervalMs = 30_000;
@@ -640,37 +669,44 @@ function lineChartSvg(series, opts) {
   const ticks = [];
   if (tickIntervalMs > 0) {
     const firstTick = Math.ceil(tMin / tickIntervalMs) * tickIntervalMs;
-    for (let t = firstTick; t <= tMax; t += tickIntervalMs) {
-      ticks.push(t);
-    }
+    for (let t = firstTick; t <= tMax; t += tickIntervalMs) ticks.push(t);
   }
 
-  // Label spacing to avoid overlap
   const labelMinPx = 60;
   const maxLabels = Math.max(1, Math.floor(innerW / labelMinPx));
   const labelStep = Math.max(1, Math.ceil(ticks.length / maxLabels));
+  const fmtTick = (ts) => new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
   const vGridAndLabels = ticks.map((t, i) => {
     const xx = x(t).toFixed(1);
     const showLabel = i % labelStep === 0 || i === ticks.length - 1;
-    const fmt = (ts) => new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
     return `
       <line x1="${xx}" y1="${padding.top}" x2="${xx}" y2="${padding.top + innerH}" class="grid-v"/>
-      ${showLabel ? `<text x="${xx}" y="${height - 6}" text-anchor="middle" font-size="9">${fmt(t)}</text>` : ''}
+      ${showLabel ? `<text x="${xx}" y="${height - 6}" text-anchor="middle" font-size="9">${fmtTick(t)}</text>` : ''}
     `;
   }).join('');
 
-  const path = (pts) => {
-    if (pts.length === 0) return '';
-    return pts.map((p, i) => (i === 0 ? 'M' : 'L') + x(p.t).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ');
-  };
-  const area = (pts) => {
-    if (pts.length === 0) return '';
-    const start = `M${x(pts[0].t).toFixed(1)},${(padding.top + innerH).toFixed(1)}`;
-    const line = pts.map((p) => 'L' + x(p.t).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ');
-    const end = `L${x(pts[pts.length - 1].t).toFixed(1)},${(padding.top + innerH).toFixed(1)} Z`;
-    return start + ' ' + line + ' ' + end;
-  };
+  // Stacked area paths (from bottom to top)
+  function stackedAreas(key, colorIdx, prevTops) {
+    if (buckets.length < 2) return '';
+    const pts = buckets.map((b, i) => {
+      const top = prevTops[i] + b[key];
+      return { x: x(b.t), y: y(top) };
+    });
+    const baseY = y(prevTops[0]);
+    const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+    const close = 'L' + pts[pts.length - 1].x.toFixed(1) + ',' + baseY + ' Z';
+    // Update tops for next series
+    for (let i = 0; i < prevTops.length; i++) prevTops[i] += buckets[i][key];
+    return `<path class="series-fill" fill="${stackColors[colorIdx]}" d="${d} ${close}" opacity="0.15"/>
+      <path class="series" stroke="${stackColors[colorIdx]}" fill="none" stroke-width="1.5" d="${d}"/>`;
+  }
+
+  const stacks = [];
+  const tops = buckets.map(() => 0);
+  for (let i = 0; i < stackKeys.length; i++) {
+    stacks.push(stackedAreas(stackKeys[i], i, tops));
+  }
 
   return `
     <svg class="chart-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
@@ -680,11 +716,11 @@ function lineChartSvg(series, opts) {
         <text x="4" y="${padding.top + 8}">${fmtTokens(vMax)}</text>
         <text x="4" y="${padding.top + innerH}">0</text>
       </g>
-      <path class="series-cachewrite series-fill" d="${area(series.cacheRead)}"/>
-      <path class="series-cachewrite series" d="${path(series.cacheRead)}"/>
-      <path class="series-input series-fill" d="${area(series.input)}"/>
-      <path class="series-input series" d="${path(series.input)}"/>
-      <path class="series-output series" d="${path(series.output)}"/>
+      ${stacks.join('')}
+      ${stackKeys.map((key, i) => `
+        <rect x="${width - padding.right + 6}" y="${padding.top + i * 16}" width="10" height="10" rx="2" fill="${stackColors[i]}" opacity="0.6"/>
+        <text x="${width - padding.right + 20}" y="${padding.top + i * 16 + 9}" font-size="9" fill="var(--text-secondary)">${key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase())}</text>
+      `).join('')}
     </svg>
   `;
 }
@@ -1145,8 +1181,14 @@ function renderLogs() {
 
   const filtered = getFilteredLogs();
   const totalH = filtered.length * LOG_ROW_H;
-  const scrollTop = body.scrollTop;
   const viewportH = body.clientHeight || 480;
+
+  // If following and not paused, stay at bottom
+  if (logFollow && !state.paused) {
+    body.scrollTop = body.scrollHeight;
+  }
+
+  const scrollTop = body.scrollTop;
   const first = Math.max(0, Math.floor(scrollTop / LOG_ROW_H) - LOG_OVERSCAN);
   const visible = Math.ceil(viewportH / LOG_ROW_H) + LOG_OVERSCAN * 2;
   const last = Math.min(filtered.length, first + visible);
@@ -1156,8 +1198,6 @@ function renderLogs() {
 
   const slice = filtered.slice(first, last);
   rows.innerHTML = slice.map((entry, i) => renderLogRow(entry, first + i)).join('');
-
-  if (logFollow) body.scrollTop = body.scrollHeight;
 
   // Count
   const totalAll = state.archivedLogs.length + state.recentLogs.length;
@@ -1231,11 +1271,16 @@ function initLogsToolbar() {
   });
   $('#log-body').addEventListener('scroll', () => {
     const body = $('#log-body');
-    const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
+    const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
     logFollow = atBottom;
     ensureLogRender();
   });
-  // Right-click context menu on log rows
+  // When unpausing, scroll to bottom
+  $('#logs-pause').addEventListener('click', () => {
+    if (state.paused) {
+      logFollow = true;
+    }
+  });
   const ctxMenu = $('#ctx-menu');
   $('#log-body').addEventListener('contextmenu', (e) => {
     const row = e.target.closest('.log-row');
