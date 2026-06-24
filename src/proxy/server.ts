@@ -17,6 +17,7 @@ import {
 import { buildUpstreamHeaders, extractCacheHeaders } from './header-passthrough.js'
 import { isQuota429, resolveCooldownMs } from './quota-detector.js'
 import { parseUsageData } from './response-parser.js'
+import { estimateCost } from './rate-card.js'
 import { SessionAffinityStore } from './session-affinity.js'
 
 export interface ProxyServerConfig {
@@ -315,7 +316,15 @@ export class ProxyServer {
         const responseBody = await responseTextPromise
         const usageData = parseUsageData(responseBody, prepared.model ?? undefined)
         const tokens = usageData?.tokens ?? null
-        const cost = tokens ? (usageData?.cost ?? null) : null
+        let cost: number | null = tokens ? (usageData?.cost ?? null) : null
+        let costEstimated = false
+        if (tokens && cost == null) {
+          const estimated = estimateCost(prepared.model, tokens)
+          if (estimated != null) {
+            cost = estimated
+            costEstimated = true
+          }
+        }
         if (tokens) {
           this.quotaTracker.recordUsage(key.id, tokens, cost)
         }
@@ -347,6 +356,7 @@ export class ProxyServer {
           sessionId: upstreamSessionId ?? sessionKey ?? null,
           tokens: tokens || null,
           cost,
+          costEstimated,
         })
         return
       } catch (err) {

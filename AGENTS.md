@@ -165,9 +165,26 @@ is the upstream itself.
 - The `cost` field that some providers return in usage payloads is
   recorded as a *display-only* `costAccumulated`. It is never used
   to drive routing, never compared against a `QUOTA_LIMIT`, and
-  never fed into a rolling-window estimate. The local rate-card
-  fallback in `response-parser.ts:estimateCost` was removed
-  because it produced wildly inaccurate numbers on OpenCode Go.
+  never fed into a rolling-window estimate.
+- The OpenCode Go upstream does not return a `cost` field in its
+  responses. `src/proxy/rate-card.ts` provides a per-model rate
+  card (input/output/cacheRead/cacheWrite per 1M tokens) sourced
+  from https://opencode.ai/docs/go. The proxy server falls back to
+  `estimateCost(model, tokens)` when the upstream omits the field,
+  and tags the log entry with `costEstimated: true`. The dashboard
+  renders estimated values in yellow italic with a `~` prefix and
+  a tooltip: "Estimated from published rate card — may not reflect
+  the actual cost." Actual upstream values render plain without
+  the `~` prefix. Models missing from the rate card keep `cost: null`
+  and the cell shows `—` with a tooltip explaining the absence.
+  Tiered pricing (Qwen3.6/3.7 Plus, Qwen3.7 Max) applies the higher
+  tier rate when `cacheRead + input > 256_000` tokens.
+- Aggregate actual cost from the local `opencode.db` SQLite file is
+  available through `OpenCodeUsageStore` and surfaced in the
+  overview's `actualUsage` summary (30d / 7d / calendar month /
+  all-time). Per-request matching between proxy log entries and
+  opencode.db session rows is not implemented — the IDs are
+  different formats and the heuristic would be fragile.
 - The two strategies that depended on the cost estimate
   (`priority_spillover` and `highest_remaining_quota`) were
   removed. `normalizeRoutingStrategy()` maps them to

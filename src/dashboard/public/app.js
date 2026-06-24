@@ -1210,7 +1210,9 @@ function renderLogRowHTML(entry, idx) {
       <span class="cell model" title="${escapeHtml(m.model || '')}">${escapeHtml(m.model || '')}</span>
       <span class="cell reason" title="${escapeHtml(m.routeReason || entry.message || '')}">${escapeHtml(m.routeReason || entry.message || '')}</span>
       <span class="cell tokens">${escapeHtml(tokenText)}</span>
-      <span class="cell cost">${m.cost != null ? escapeHtml(fmtCurrency(m.cost)) : ''}</span>
+      ${m.cost != null
+        ? `<span class="cell cost ${m.costEstimated ? 'is-estimated' : ''}" title="${escapeHtml(m.costEstimated ? 'Estimated from published rate card — may not reflect the actual cost.' : 'Actual cost returned by the upstream provider.')}">${m.costEstimated ? '~' : ''}${escapeHtml(fmtCurrency(m.cost))}</span>`
+        : '<span class="cell cost" title="Cost not reported by the upstream and no rate card entry for this model.">—</span>'}
       ${expanded ? `<div class="log-detail">${escapeHtml(JSON.stringify(entry, null, 2))}</div>` : ''}
     </div>
   `;

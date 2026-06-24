@@ -1210,6 +1210,7 @@ input, select, textarea {
 .log-row .reason { color: var(--text-secondary); }
 .log-row .tokens { color: var(--text-faint); font-size: 11px; }
 .log-row .cost { color: var(--text); text-align: right; }
+.log-row .cost.is-estimated { color: var(--yellow); font-style: italic; }
 
 .log-detail {
   grid-column: 1 / -1;
