@@ -8,6 +8,38 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 > **💰 Support the project:** Use this referral link to [sign up for OpenCode Go](https://opencode.ai/go?ref=HF6N2D2RCR) and get **$5 free credit** to start. Every referral helps keep this project maintained.
 
+## Preview
+
+### Overview
+
+KPI strip, quota-error panel, live token-throughput chart, breakdown, and 30-day usage.
+
+![Overview](resources/overview.png)
+
+### Accounts
+
+Add, enable/drain, reorder, and set priority/weight for each account. Each card shows circuit-breaker state, quota-error tally, token breakdown, latency, error rate, last model, and a live Test button.
+
+![Accounts](resources/accounts.png)
+
+### Routing
+
+Select an active strategy and see its description, best-for recommendation, and cache friendliness.
+
+![Routing](resources/routing.png)
+
+### Tokens
+
+Per-model and per-key time series, category share, observed cost, and 30-day rolling usage.
+
+![Tokens](resources/tokens.png)
+
+### Logs
+
+Virtualized table of every routed request, with search across path/model/key/route reason, filter by level/provider, pause auto-scroll, and right-click to copy fields.
+
+![Logs](resources/logs.png)
+
 ## Features
 
 - **Three Routing Strategies** — Priority Failover (cache-first default), Round Robin, Weighted Cycle. Each explained in the dashboard UI.
