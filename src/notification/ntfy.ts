@@ -8,8 +8,16 @@ const PRIORITY_MAP: Record<string, number> = {
   urgent: 5,
 }
 
+export interface NotificationEntry {
+  timestamp: number
+  title: string
+  message: string
+  priority: string
+}
+
 export class NtfyNotifier {
   private url: string
+  private history: NotificationEntry[] = []
 
   constructor(ntfyUrl?: string) {
     this.url = (ntfyUrl ?? '').replace(/\/+$/, '')
@@ -23,7 +31,13 @@ export class NtfyNotifier {
     return this.url.length > 0
   }
 
+  getHistory(): NotificationEntry[] {
+    return this.history
+  }
+
   async send(title: string, message: string, priority: keyof typeof PRIORITY_MAP = 'default'): Promise<void> {
+    this.history.push({ timestamp: Date.now(), title, message, priority })
+    if (this.history.length > 50) this.history.shift()
     if (!this.enabled) return
 
     try {

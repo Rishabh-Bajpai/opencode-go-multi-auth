@@ -49,6 +49,10 @@
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           <span>Logs</span>
         </button>
+        <button class="nav-item" data-page="models">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          <span>Models</span>
+        </button>
         <button class="nav-item" data-page="settings">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>Settings</span>
@@ -110,6 +114,14 @@
             <span class="panel-meta">Rolling 30d across all accounts</span>
           </div>
           <div id="overview-30d" class="card-body"></div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+          <div class="card-head">
+            <h3>Model distribution</h3>
+            <span class="panel-meta">Share of tokens by model (live log buffer)</span>
+          </div>
+          <div id="overview-model-donut" class="card-body"></div>
         </div>
       </section>
 
@@ -257,6 +269,32 @@
         </div>
       </section>
 
+      <!-- MODELS -->
+      <section class="page" data-page="models">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Models</h1>
+            <p class="page-subtitle">Browse available models and control which ones appear in token charts.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Select visible models</h3>
+            <span class="panel-meta">Charts on the Tokens page only show selected models. Empty = show all.</span>
+          </div>
+          <div class="card-body" style="padding: 0 16px 16px;">
+            <div class="model-toolbar">
+              <div class="model-filter-row">
+                <button class="btn btn-sm" id="models-select-all">Select all</button>
+                <button class="btn btn-sm" id="models-deselect-all">Deselect all</button>
+                <button class="btn btn-primary btn-sm" id="models-save">Save</button>
+              </div>
+            </div>
+            <div id="models-list"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- SETTINGS -->
       <section class="page" data-page="settings">
         <div class="page-header">
@@ -286,6 +324,16 @@
               <input class="input input-mono ntfy-input" type="text" placeholder="https://ntfy.sh/mytopic" style="flex: 1;" autocomplete="off">
               <button class="btn btn-primary ntfy-save">Save</button>
             </div>
+          </div>
+        </div>
+
+        <div class="card" id="settings-notifications-log" style="margin-top: 16px;">
+          <div class="card-head">
+            <h3>Notification log</h3>
+            <span class="panel-meta" id="notif-log-count">0 sent this session</span>
+          </div>
+          <div class="card-body" id="notif-log-body">
+            <div class="empty-state">No notifications sent yet.</div>
           </div>
         </div>
 
@@ -341,6 +389,7 @@
   </div>
 
   <div class="toast-stack" id="toast-stack"></div>
+  <div class="ctx-menu" id="ctx-menu" style="display:none;"></div>
 
   <script src="/app.js"></script>
 </body>

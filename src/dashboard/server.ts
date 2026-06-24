@@ -28,6 +28,7 @@ export class DashboardServer {
 
   constructor(
     port: number,
+    private proxyPort: number,
     private keyManager: KeyManager,
     private circuitBreaker: CircuitBreaker,
     private quotaTracker: QuotaTracker,
@@ -192,6 +193,65 @@ export class DashboardServer {
       this.configStore.set('ntfyUrl', ntfyUrl as any)
       this.notifier.updateUrl(ntfyUrl)
       res.json({ ntfyUrl })
+    })
+
+    this.app.get('/api/models', async (_req, res) => {
+      try {
+        const proxy = `http://127.0.0.1:${this.proxyPort}`
+        const [goRes, zenRes] = await Promise.allSettled([
+          fetch(`${proxy}/v1/models`).then(r => r.json()),
+          fetch(`${proxy}/zen/v1/models`).then(r => r.json()),
+        ])
+        res.json({
+          go: goRes.status === 'fulfilled' ? (goRes.value.data || []) : [],
+          zen: zenRes.status === 'fulfilled' ? (zenRes.value.data || []) : [],
+        })
+      } catch {
+        res.status(500).json({ error: 'Failed to fetch models' })
+      }
+    })
+
+    this.app.get('/api/visible-models', (_req, res) => {
+      const raw = this.configStore.get('visibleModels') as string || ''
+      const models = raw ? raw.split(',').filter(Boolean) : []
+      res.json({ models })
+    })
+
+    this.app.put('/api/visible-models', (req, res) => {
+      const { models } = req.body ?? {}
+      if (!Array.isArray(models)) {
+        res.status(400).json({ error: 'models must be an array' })
+        return
+      }
+      this.configStore.set('visibleModels', models.join(','))
+      res.json({ models })
+    })
+
+    this.app.get('/api/notifications', (_req, res) => {
+      res.json(this.notifier.getHistory())
+    })
+
+    this.app.post('/api/keys/:id/test', async (req, res) => {
+      const key = this.keyManager.getKeyById(req.params.id)
+      if (!key) {
+        res.status(404).json({ error: 'Key not found' })
+        return
+      }
+      const start = Date.now()
+      try {
+        const upstreamRes = await fetch(`http://127.0.0.1:${this.proxyPort}/v1/models`, {
+          headers: {
+            'x-api-key': key.key,
+            'Authorization': `Bearer ${key.key}`,
+          },
+          signal: AbortSignal.timeout(10000),
+        })
+        const duration = Date.now() - start
+        res.json({ ok: upstreamRes.ok, status: upstreamRes.status, latencyMs: duration })
+      } catch (err) {
+        const duration = Date.now() - start
+        res.json({ ok: false, error: err instanceof Error ? err.message : String(err), latencyMs: duration })
+      }
     })
 
     this.app.get('/api/status', (_req, res) => {

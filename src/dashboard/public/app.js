@@ -115,6 +115,11 @@ const api = {
   removeKey(id) { return this.req(`/api/keys/${id}`, { method: 'DELETE' }); },
   config() { return this.req('/api/config'); },
   setConfig(payload) { return this.req('/api/config', { method: 'PUT', body: payload }); },
+  models() { return this.req('/api/models'); },
+  visibleModels() { return this.req('/api/visible-models'); },
+  setVisibleModels(payload) { return this.req('/api/visible-models', { method: 'PUT', body: payload }); },
+  notifications() { return this.req('/api/notifications'); },
+  testKey(id) { return this.req(`/api/keys/${id}/test`, { method: 'POST' }); },
   recentLogs() { return this.req('/api/logs'); },
 };
 
@@ -135,6 +140,7 @@ const state = {
   paused: false,
   pausedBuffer: [],
   logById: new Map(),      // id -> log entry, for finding expanded row
+  visibleModels: null,     // string[] or null (null = all)
 };
 
 // ---------------------------------------------------------------------------
@@ -158,6 +164,7 @@ function setPage(page) {
   if (page === 'routing') renderRouting();
   if (page === 'accounts') renderAccounts();
   if (page === 'tokens') renderTokens();
+  if (page === 'models') renderModels();
   if (page === 'settings') renderSettings();
 }
 
@@ -371,6 +378,7 @@ function renderOverview() {
   renderQuotaErrors();
   renderTokenBreakdown();
   renderToken30d();
+  renderModelDonut();
   renderOverviewChart();
 }
 
@@ -503,6 +511,59 @@ function renderToken30d() {
         <span><span class="swatch" style="background: var(--yellow);"></span>Cache write ${fmtTokens(totals.cacheWrite)}</span>
         <span><span class="swatch" style="background: var(--red);"></span>Reasoning ${fmtTokens(totals.reasoning)}</span>
       </div>
+    </div>
+  `;
+}
+
+const DONUT_COLORS = ['var(--accent)', 'var(--green)', 'var(--purple)', 'var(--yellow)', 'var(--red)', '#f9a825', '#7c4dff', '#00bfa5', '#ff6d00', '#536dfe', 'var(--text-faint)'];
+
+function renderModelDonut() {
+  const host = $('#overview-model-donut');
+  if (!host) return;
+  const now = Date.now();
+  const cutoff = now - 86400000;
+  const entries = getTokenLogsInWindow(86400000, now);
+  const { byModel } = aggregateAll(entries);
+  const vm = state.visibleModels;
+  if (vm && vm.length) {
+    for (const [model] of byModel) {
+      if (!vm.includes(model)) byModel.delete(model);
+    }
+  }
+  const sorted = [...byModel.entries()]
+    .map(([model, data]) => ({ model, total: data.input + data.output + data.cacheRead + data.cacheWrite + data.reasoning }))
+    .sort((a, b) => b.total - a.total);
+  if (!sorted.length) { host.innerHTML = '<div class="empty-state">No token data in the last 24h.</div>'; return; }
+  const top = sorted.slice(0, 8);
+  const other = sorted.slice(8);
+  const otherTotal = other.reduce((s, m) => s + m.total, 0);
+  if (otherTotal > 0) top.push({ model: 'Other', total: otherTotal });
+  const grandTotal = top.reduce((s, m) => s + m.total, 0);
+  const radius = 50;
+  const circ = 2 * Math.PI * radius;
+  let offset = 0;
+  const segments = top.map((m, i) => {
+    const pct = m.total / grandTotal;
+    const len = pct * circ;
+    const seg = `<circle cx="60" cy="60" r="${radius}" fill="none" stroke="${DONUT_COLORS[i % DONUT_COLORS.length]}" stroke-width="18" stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-offset}" />`;
+    offset += len;
+    return seg;
+  }).join('');
+  const legend = top.map((m, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:11px;color:var(--text-secondary);">
+      <span style="width:8px;height:8px;border-radius:2px;background:${DONUT_COLORS[i % DONUT_COLORS.length]};flex-shrink:0;"></span>
+      ${escapeHtml(m.model)} <strong style="color:var(--text);">${(m.total / grandTotal * 100).toFixed(1)}%</strong>
+    </span>`
+  ).join('');
+  host.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;padding:8px 0;">
+      <svg width="120" height="120" viewBox="0 0 120 120" style="flex-shrink:0;">
+        <circle cx="60" cy="60" r="${radius}" fill="none" stroke="var(--border)" stroke-width="18" />
+        ${segments}
+        <circle cx="60" cy="60" r="33" fill="var(--bg-elev-2)" />
+        <text x="60" y="60" text-anchor="middle" dominant-baseline="central" fill="var(--text)" font-size="16" font-weight="700">${fmtTokens(grandTotal)}</text>
+      </svg>
+      <div style="display:flex;flex-wrap:wrap;gap:4px 0;flex:1;">${legend}</div>
     </div>
   `;
 }
@@ -703,6 +764,16 @@ function renderAccountCard(key) {
     ? `<div class="account-quota-line">Last quota error: <strong>HTTP ${lastQuotaError.statusCode}</strong> ${escapeHtml(lastQuotaError.message || '')}${lastQuotaError.resetAt ? ` · retry ${fmtDateTime(new Date(lastQuotaError.resetAt).toISOString())}` : ''}</div>`
     : '';
 
+  const circuitChip = key.health === 'open'
+    ? '<span class="chip chip-red" title="Circuit breaker OPEN — this key is temporarily skipped due to consecutive 5xx errors.">⏻ open</span>'
+    : key.health === 'half_open'
+      ? '<span class="chip chip-yellow" title="Circuit breaker HALF-OPEN — probing if key has recovered.">◐ half-open</span>'
+      : '';
+
+  const errorRate = key.requestCount > 0 ? ((key.errorCount / key.requestCount) * 100) : 0;
+  const errRateColor = errorRate < 5 ? 'var(--green)' : errorRate < 20 ? 'var(--yellow)' : 'var(--red)';
+  const errRateText = errorRate > 0 ? `<span style="color:${errRateColor};font-weight:600;">${errorRate.toFixed(1)}%</span>` : '0%';
+
   return `
     <article class="account-card ${key.enabled ? '' : 'is-muted'}" data-id="${key.id}">
       <div class="drag-handle" draggable="true" title="Drag to reorder">⋮⋮</div>
@@ -715,6 +786,7 @@ function renderAccountCard(key) {
         </div>
         <div class="account-actions" style="margin-top: 8px;">
           ${statusChip}
+          ${circuitChip}
           ${quotaErrorChip}
           ${cooldown}
         </div>
@@ -726,7 +798,7 @@ function renderAccountCard(key) {
           <span><span class="label">Pri</span><strong>#${key.priority}</strong></span>
           <span><span class="label">Wt</span><strong>${key.weight}</strong></span>
           <span><span class="label">Req</span><strong>${fmtTokens(key.requestCount)}</strong></span>
-          <span><span class="label">Err</span><strong>${fmtTokens(key.errorCount)}</strong></span>
+          <span><span class="label">Err</span><strong>${fmtTokens(key.errorCount)} (${errRateText})</strong></span>
           <span><span class="label">Lat</span><strong>${key.averageLatencyMs ? `${Math.round(key.averageLatencyMs)}ms` : '—'}</strong></span>
           <span><span class="label">Last</span><strong>${escapeHtml(lastModel)}</strong></span>
         </div>
@@ -754,6 +826,7 @@ function renderAccountCard(key) {
         </div>
         <div class="account-actions">
           <button class="btn btn-sm" data-action="reset" data-id="${key.id}">Reset cooldown</button>
+          <button class="btn btn-sm" data-action="test" data-id="${key.id}">Test</button>
           <div class="toggle ${key.enabled ? 'on' : ''}" data-action="toggle" data-id="${key.id}" role="switch" aria-checked="${key.enabled}"></div>
           <button class="btn btn-sm btn-danger" data-action="remove" data-id="${key.id}">Remove</button>
         </div>
@@ -787,6 +860,31 @@ function initAccountCardHandlers(host) {
     el.addEventListener('click', async () => {
       try { await api.resetCooldown(el.dataset.id); toast('Cooldown reset', 'success'); await refreshKeys(); }
       catch (err) { toast(err.message, 'error'); }
+    });
+  });
+
+  // Test key
+  $$('button[data-action="test"]', host).forEach((el) => {
+    el.addEventListener('click', async () => {
+      const id = el.dataset.id;
+      el.disabled = true;
+      el.textContent = 'Testing…';
+      try {
+        const result = await api.testKey(id);
+        if (result.ok) {
+          toast(`Key OK (HTTP ${result.status}) — ${result.latencyMs}ms`, 'success');
+          el.textContent = '✓ Test';
+          setTimeout(() => { el.textContent = 'Test'; el.disabled = false; }, 3000);
+        } else {
+          toast(`Test failed: ${result.error || `HTTP ${result.status}`}`, 'error');
+          el.textContent = '✗ Test';
+          setTimeout(() => { el.textContent = 'Test'; el.disabled = false; }, 4000);
+        }
+      } catch (err) {
+        toast(err.message, 'error');
+        el.textContent = 'Test';
+        el.disabled = false;
+      }
     });
   });
 
@@ -1136,6 +1234,38 @@ function initLogsToolbar() {
     const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 20;
     logFollow = atBottom;
     ensureLogRender();
+  });
+  // Right-click context menu on log rows
+  const ctxMenu = $('#ctx-menu');
+  $('#log-body').addEventListener('contextmenu', (e) => {
+    const row = e.target.closest('.log-row');
+    if (!row) { ctxMenu.style.display = 'none'; return; }
+    e.preventDefault();
+    const idx = parseInt(row.dataset.logIdx, 10);
+    const entry = getFilteredLogs()[idx];
+    if (!entry) return;
+    const m = entry.meta || {};
+    ctxMenu.innerHTML =
+      `<div class="ctx-item" data-copy="${escapeHtml(m.model || '')}">Copy model</div>` +
+      `<div class="ctx-item" data-copy="${escapeHtml(m.path || '')}">Copy path</div>` +
+      `<div class="ctx-item" data-copy="${escapeHtml(m.keyAlias || '')}">Copy key alias</div>` +
+      `<div class="ctx-sep"></div>` +
+      `<div class="ctx-item" data-copy="${escapeHtml(JSON.stringify(entry))}">Copy full entry</div>`;
+    ctxMenu.style.display = 'block';
+    ctxMenu.style.left = Math.min(e.clientX, window.innerWidth - 220) + 'px';
+    ctxMenu.style.top = Math.min(e.clientY, window.innerHeight - 200) + 'px';
+  });
+  ctxMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.ctx-item');
+    if (!item) return;
+    navigator.clipboard.writeText(item.dataset.copy).then(() => toast('Copied', 'success')).catch(() => {});
+    ctxMenu.style.display = 'none';
+  });
+  document.addEventListener('click', (e) => {
+    if (!ctxMenu.contains(e.target)) ctxMenu.style.display = 'none';
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') ctxMenu.style.display = 'none';
   });
 }
 
@@ -1522,6 +1652,9 @@ function renderTokensModelSeries(buckets) {
     const sa = a[1].input + a[1].output + a[1].cacheRead + a[1].cacheWrite + a[1].reasoning;
     const sb = b[1].input + b[1].output + b[1].cacheRead + b[1].cacheWrite + b[1].reasoning;
     return sb - sa;
+  }).filter(([model]) => {
+    const vm = state.visibleModels;
+    return !vm || !vm.length || vm.includes(model);
   });
   host.innerHTML = sorted.map(([model, agg]) => {
     const total = agg.input + agg.output + agg.cacheRead + agg.cacheWrite + agg.reasoning;
@@ -1666,6 +1799,14 @@ function renderTokens() {
   const { totals, byModel } = aggregateAll(entries);
   const { buckets } = bucketize(entries, config.bucketMs, cutoff, now);
 
+  // Filter by visible models if set
+  const vm = state.visibleModels;
+  if (vm && vm.length) {
+    for (const [model] of byModel) {
+      if (!vm.includes(model)) byModel.delete(model);
+    }
+  }
+
   const label = config.label;
   $('#tokens-shared-meta').textContent = `${label} · stacked area by category · bucket ${formatBucket(config.bucketMs)}`;
   $('#tokens-models-meta').textContent = `${label} · ${byModel.size} model${byModel.size === 1 ? '' : 's'}`;
@@ -1704,8 +1845,49 @@ function initTokensPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Page: Settings
+// Page: Models
 // ---------------------------------------------------------------------------
+
+async function renderModels() {
+  const host = $('#models-list');
+  if (!host) return;
+  const [modelsData, vm] = await Promise.all([api.models(), api.visibleModels()]);
+  const selected = new Set(vm.models || []);
+  state.visibleModels = vm.models || null;
+
+  const renderGroup = (title, models) => models.length ? `
+    <div class="model-group">
+      <div class="model-group-title">${escapeHtml(title)}</div>
+      ${models.map((m) => {
+        const id = m.id || m;
+        const checked = selected.has(id) || selected.size === 0;
+        return `
+          <label class="model-check-row">
+            <input type="checkbox" class="model-check" value="${escapeHtml(id)}" ${checked ? 'checked' : ''}>
+            <span class="model-check-id">${escapeHtml(id)}</span>
+          </label>
+        `;
+      }).join('')}
+    </div>` : '';
+
+  const goSection = renderGroup('OpenCode Go', modelsData.go || []);
+  const zenSection = renderGroup('OpenCode Zen', modelsData.zen || []);
+  host.innerHTML = goSection + zenSection;
+  if (!goSection && !zenSection) host.innerHTML = '<div class="empty-state">Could not fetch model list from the proxy.</div>';
+
+  $('#models-select-all').onclick = () => { $$('.model-check', host).forEach((cb) => cb.checked = true); };
+  $('#models-deselect-all').onclick = () => { $$('.model-check', host).forEach((cb) => cb.checked = false); };
+  $('#models-save').onclick = async () => {
+    const checked = [...$$('.model-check:checked', host)].map((cb) => cb.value);
+    try {
+      await api.setVisibleModels({ models: checked });
+      state.visibleModels = checked.length ? checked : null;
+      toast('Visible models saved', 'success');
+    } catch (err) {
+      toast('Failed to save: ' + (err instanceof Error ? err.message : String(err)), 'error');
+    }
+  };
+}
 
 async function renderSettings() {
   const table = $('#config-table');
@@ -1778,6 +1960,29 @@ async function renderSettings() {
   $('#settings-meta').textContent = `Snapshot at ${fmtDateTime(new Date().toISOString())}`;
   $('#footer-dashboard').textContent = `:${location.port || 18904}`;
   $('#footer-proxy').textContent = ':18905';
+
+  // Notification log
+  const notifBody = $('#notif-log-body');
+  const notifCount = $('#notif-log-count');
+  if (notifBody && notifCount) {
+    try {
+      const history = await api.notifications();
+      notifCount.textContent = `${history.length} sent this session`;
+      if (!history.length) {
+        notifBody.innerHTML = '<div class="empty-state">No notifications sent yet.</div>';
+      } else {
+        notifBody.innerHTML = history.slice().reverse().slice(0, 20).map((n) => `
+          <div class="notif-entry">
+            <span class="notif-time">${escapeHtml(fmtDateTime(new Date(n.timestamp).toISOString()))}</span>
+            <span class="notif-title">${escapeHtml(n.title)}</span>
+            <span class="notif-msg">${escapeHtml(n.message.length > 80 ? n.message.slice(0, 80) + '…' : n.message)}</span>
+          </div>
+        `).join('');
+      }
+    } catch {
+      notifBody.innerHTML = '<div class="empty-state">Could not load notification log.</div>';
+    }
+  }
 }
 
 // Render settings on first visit

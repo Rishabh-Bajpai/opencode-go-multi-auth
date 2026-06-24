@@ -81,6 +81,7 @@ export interface RouterConfig {
   configDir: string
   strategy: RoutingStrategy
   ntfyUrl: string
+  visibleModels: string
   requestTimeoutMs: number
   upstreamHungTimeoutMs: number
   keepAliveTimeoutMs: number
@@ -150,6 +151,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   configDir: '',
   strategy: RoutingStrategy.PRIORITY_FAILOVER,
   ntfyUrl: '',
+  visibleModels: '',
   requestTimeoutMs: 0,
   upstreamHungTimeoutMs: 0,
   keepAliveTimeoutMs: 5 * 60 * 1000,
