@@ -1126,13 +1126,16 @@ function renderRouting() {
 }
 
 // ---------------------------------------------------------------------------
-// Page: Logs (virtualized)
+// Page: Logs (virtualized with stable scroll, optional pagination)
 // ---------------------------------------------------------------------------
 
 const LOG_ROW_H = 32;
-const LOG_OVERSCAN = 6;
+const LOG_OVERSCAN = 8;
 let logRenderPending = false;
 let logFollow = true;
+let logMode = 'virtualized';
+let logPage = 1;
+let logPageSize = 250;
 
 function getFilteredLogs() {
   const search = state.logFilter.search.trim().toLowerCase();
@@ -1172,41 +1175,7 @@ function ensureLogRender() {
 
 const scheduleLogRender = rAFThrottle(ensureLogRender);
 
-function renderLogs() {
-  const body = $('#log-body');
-  if (!body) return;
-  const rows = $('#log-rows');
-  const topSpacer = $('#log-spacer-top');
-  const botSpacer = $('#log-spacer-bot');
-  if (!rows || !topSpacer || !botSpacer) return;
-
-  const filtered = getFilteredLogs();
-  const totalH = filtered.length * LOG_ROW_H;
-  const viewportH = body.clientHeight || 480;
-  const scrollTop = body.scrollTop;
-  const first = Math.max(0, Math.floor(scrollTop / LOG_ROW_H) - LOG_OVERSCAN);
-  const visible = Math.ceil(viewportH / LOG_ROW_H) + LOG_OVERSCAN * 2;
-  const last = Math.min(filtered.length, first + visible);
-
-  topSpacer.style.height = (first * LOG_ROW_H) + 'px';
-  botSpacer.style.height = Math.max(0, totalH - last * LOG_ROW_H) + 'px';
-
-  const slice = filtered.slice(first, last);
-  rows.innerHTML = slice.map((entry, i) => renderLogRow(entry, first + i)).join('');
-
-  // Count
-  const totalAll = state.archivedLogs.length + state.recentLogs.length;
-  $('#logs-count').textContent = `${fmtNumber(filtered.length)} of ${fmtNumber(totalAll)} entries`;
-  $('#logs-status').textContent = state.paused ? 'Paused (buffered)' : 'Live';
-}
-
-function scrollLogToBottom() {
-  const body = $('#log-body');
-  if (!body) return;
-  body.scrollTop = body.scrollHeight;
-}
-
-function renderLogRow(entry, idx) {
+function renderLogRowHTML(entry, idx) {
   const m = entry.meta || {};
   const status = m.statusCode || '';
   const statusClass = status >= 500 ? 'status-5xx'
@@ -1220,8 +1189,11 @@ function renderLogRow(entry, idx) {
   const isQuota = Boolean(m.quotaError);
   const quotaPill = isQuota ? ' <span class="quota-pill">QUOTA</span>' : '';
   const expanded = state.expandedLogId === entry.__id;
+  const top = idx * LOG_ROW_H;
+  const expandedClass = expanded ? ' expanded' : '';
+  const quotaClass = isQuota ? ' is-quota' : '';
   return `
-    <div class="log-row ${expanded ? 'expanded' : ''} ${isQuota ? 'is-quota' : ''}" data-log-id="${entry.__id}" data-log-idx="${idx}">
+    <div class="log-row${expandedClass}${quotaClass}" data-log-id="${entry.__id}" data-log-idx="${idx}" style="top:${top}px;">
       <span class="cell time">${escapeHtml(fmtTime(entry.timestamp))}</span>
       <span class="cell level level-${escapeHtml(entry.level || 'info')}">${escapeHtml((entry.level || 'info').toUpperCase())}${quotaPill}</span>
       <span class="cell method">${escapeHtml(m.method || '')}</span>
@@ -1237,13 +1209,80 @@ function renderLogRow(entry, idx) {
   `;
 }
 
+function renderLogs() {
+  const body = $('#log-body');
+  const rowsHost = $('#log-rows');
+  const emptyEl = $('#log-empty');
+  const paginationEl = $('#log-pagination');
+  if (!body || !rowsHost) return;
+
+  const all = getFilteredLogs();
+  const totalAll = state.archivedLogs.length + state.recentLogs.length;
+  const modePaginated = logMode === 'paginated';
+
+  // Update footer counts and mode
+  $('#logs-count').textContent = `${fmtNumber(all.length)} of ${fmtNumber(totalAll)} entries`;
+  $('#logs-status').textContent = state.paused ? 'Paused (buffered)' : 'Live';
+  if (paginationEl) paginationEl.style.display = modePaginated ? 'flex' : 'none';
+
+  if (!all.length) {
+    rowsHost.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = 'block';
+    rowsHost.style.height = '0px';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  if (modePaginated) {
+    const pageSize = logPageSize;
+    const totalPages = Math.max(1, Math.ceil(all.length / pageSize));
+    if (logPage > totalPages) logPage = totalPages;
+    if (logPage < 1) logPage = 1;
+    const start = (logPage - 1) * pageSize;
+    const end = Math.min(all.length, start + pageSize);
+    const slice = all.slice(start, end);
+    rowsHost.style.height = (slice.length * LOG_ROW_H) + 'px';
+    rowsHost.innerHTML = slice.map((entry, i) => renderLogRowHTML(entry, start + i)).join('');
+    const info = $('#log-page-info');
+    if (info) info.textContent = `Page ${logPage} of ${totalPages} · ${fmtNumber(start + 1)}–${fmtNumber(end)} of ${fmtNumber(all.length)}`;
+    // Reset scroll to top of page on first render
+    if (body.dataset.paginatedPage !== String(logPage)) {
+      body.scrollTop = 0;
+      body.dataset.paginatedPage = String(logPage);
+    }
+    return;
+  }
+
+  // Virtualized rendering
+  body.dataset.paginatedPage = '';
+  const viewportH = body.clientHeight || 480;
+  const totalH = all.length * LOG_ROW_H;
+  rowsHost.style.height = totalH + 'px';
+  const scrollTop = body.scrollTop;
+  const first = Math.max(0, Math.floor(scrollTop / LOG_ROW_H) - LOG_OVERSCAN);
+  const visible = Math.ceil(viewportH / LOG_ROW_H) + LOG_OVERSCAN * 2;
+  const last = Math.min(all.length, first + visible);
+  const slice = all.slice(first, last);
+  rowsHost.innerHTML = slice.map((entry, i) => renderLogRowHTML(entry, first + i)).join('');
+}
+
+function scrollLogToBottom() {
+  const body = $('#log-body');
+  if (!body) return;
+  body.scrollTop = body.scrollHeight;
+}
+
 function initLogsToolbar() {
   $('#logs-pause').addEventListener('click', () => {
     state.paused = !state.paused;
     $('#logs-pause').textContent = state.paused ? 'Resume' : 'Pause';
-    if (!state.paused && state.pausedBuffer.length) {
-      for (const e of state.pausedBuffer) ingestLog(e, { initial: true });
-      state.pausedBuffer = [];
+    if (!state.paused) {
+      logFollow = true;
+      if (state.pausedBuffer.length) {
+        for (const e of state.pausedBuffer) ingestLog(e, { initial: true });
+        state.pausedBuffer = [];
+      }
+      if (logMode === 'virtualized') scrollLogToBottom();
     }
     ensureLogRender();
   });
@@ -1251,6 +1290,8 @@ function initLogsToolbar() {
     state.archivedLogs = [];
     state.recentLogs = [];
     state.expandedLogId = null;
+    logPage = 1;
+    logFollow = true;
     ensureLogRender();
   });
   $('#logs-download').addEventListener('click', () => {
@@ -1270,19 +1311,55 @@ function initLogsToolbar() {
     state.expandedLogId = state.expandedLogId === id ? null : id;
     ensureLogRender();
   });
+  // Stable scroll handler: only update the follow flag and schedule a render.
+  // Never modify scrollTop here (that was the source of the scroll-event cycle).
+  let scrollRaf = 0;
   $('#log-body').addEventListener('scroll', () => {
-    const body = $('#log-body');
-    const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
+    if (logMode !== 'virtualized') return;
+    const el = $('#log-body');
+    if (!el) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
     logFollow = atBottom;
-    scheduleLogRender();
-  });
-  // When unpausing, scroll to bottom
-  $('#logs-pause').addEventListener('click', () => {
-    if (state.paused) {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      ensureLogRender();
+    });
+  }, { passive: true });
+  // Mode toggle (virtualized vs paginated)
+  $$('#logs-mode .filter-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      $$('#logs-mode .filter-chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      logMode = chip.dataset.mode || 'virtualized';
+      logPage = 1;
       logFollow = true;
-      scrollLogToBottom();
+      const body = $('#log-body');
+      if (body) {
+        body.scrollTop = 0;
+        body.dataset.paginatedPage = '';
+      }
+      ensureLogRender();
+    });
+  });
+  // Pagination controls
+  $('#log-page-first').addEventListener('click', () => { logPage = 1; ensureLogRender(); });
+  $('#log-page-prev').addEventListener('click', () => { logPage = Math.max(1, logPage - 1); ensureLogRender(); });
+  $('#log-page-next').addEventListener('click', () => { logPage = logPage + 1; ensureLogRender(); });
+  $('#log-page-last').addEventListener('click', () => {
+    const all = getFilteredLogs();
+    logPage = Math.max(1, Math.ceil(all.length / logPageSize));
+    ensureLogRender();
+  });
+  $('#log-page-size').addEventListener('change', (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (Number.isFinite(v) && v > 0) {
+      logPageSize = v;
+      logPage = 1;
+      ensureLogRender();
     }
   });
+  // Right-click context menu
   const ctxMenu = $('#ctx-menu');
   $('#log-body').addEventListener('contextmenu', (e) => {
     const row = e.target.closest('.log-row');

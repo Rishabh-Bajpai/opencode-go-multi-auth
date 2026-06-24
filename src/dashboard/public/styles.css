@@ -1137,17 +1137,47 @@ input, select, textarea {
   flex: 1;
   overflow-y: auto;
   position: relative;
+  /* Establishes a containing block for absolutely positioned rows. */
 }
-.log-spacer-top, .log-spacer-bot { width: 100%; }
+.log-rows-inner {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+}
+.log-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
 
 .log-row {
-  min-height: 32px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 80px 56px 56px 1.4fr 60px 120px 120px 1.5fr 110px 70px;
+  gap: 12px;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.10s;
+  background: var(--bg-elev-1);
 }
 .log-row:hover { background: var(--bg-hover); }
-.log-row.expanded { background: var(--bg-elev-2); }
+.log-row.expanded {
+  height: auto;
+  z-index: 2;
+  background: var(--bg-elev-2);
+  border-bottom: 1px solid var(--accent);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
 .log-row .cell { overflow: hidden; text-overflow: ellipsis; }
 .log-row .time { color: var(--text-muted); font-size: 11px; }
 .log-row .level { font-weight: 600; }
@@ -1204,6 +1234,30 @@ input, select, textarea {
   background: var(--bg-elev-2);
   font-size: 11px;
   color: var(--text-muted);
+  font-family: var(--font-mono);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.log-footer-left { display: flex; gap: 16px; }
+.log-footer-right { display: flex; gap: 12px; align-items: center; }
+.log-pagination {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.log-page-info {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.log-page-size {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--bg-elev-1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
   font-family: var(--font-mono);
 }
 

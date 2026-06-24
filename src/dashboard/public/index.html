@@ -258,13 +258,33 @@
             <span>Cost</span>
           </div>
           <div class="log-body" id="log-body">
-            <div class="log-spacer-top" id="log-spacer-top"></div>
-            <div id="log-rows"></div>
-            <div class="log-spacer-bot" id="log-spacer-bot"></div>
+            <div class="log-rows-inner" id="log-rows"></div>
+            <div class="log-empty" id="log-empty" style="display:none;">No log entries match the current filter.</div>
           </div>
           <div class="log-footer">
-            <span id="logs-count">0 entries</span>
-            <span id="logs-status">Live</span>
+            <div class="log-footer-left">
+              <span id="logs-count">0 entries</span>
+              <span id="logs-status">Live</span>
+            </div>
+            <div class="log-footer-right">
+              <div class="filter-chips" id="logs-mode">
+                <button class="filter-chip active" data-mode="virtualized">Virtualized</button>
+                <button class="filter-chip" data-mode="paginated">Paginated</button>
+              </div>
+              <div class="log-pagination" id="log-pagination" style="display:none;">
+                <button class="btn btn-sm" id="log-page-first" title="First page">«</button>
+                <button class="btn btn-sm" id="log-page-prev" title="Previous page">‹</button>
+                <span class="log-page-info" id="log-page-info">Page 1 of 1</span>
+                <button class="btn btn-sm" id="log-page-next" title="Next page">›</button>
+                <button class="btn btn-sm" id="log-page-last" title="Last page">»</button>
+                <select class="input log-page-size" id="log-page-size" title="Page size">
+                  <option value="100">100 / page</option>
+                  <option value="250" selected>250 / page</option>
+                  <option value="500">500 / page</option>
+                  <option value="1000">1000 / page</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </section>
