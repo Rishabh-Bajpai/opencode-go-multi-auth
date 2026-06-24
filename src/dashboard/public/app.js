@@ -318,6 +318,7 @@ function ingestLog(entry, { initial = false } = {}) {
 
   if (state.currentPage === 'logs') {
     scheduleLogRender();
+    if (logFollow && !state.paused) scrollLogToBottom();
   }
   if (state.currentPage === 'overview') {
     scheduleOverviewChart();
@@ -603,14 +604,14 @@ function renderOverviewChart() {
     host.innerHTML = `<div style="height: 220px; display: flex; align-items: center; justify-content: center; color: var(--text-faint); font-size: 12px; font-family: var(--font-mono);">Waiting for token activity…</div>`;
     return;
   }
-  host.innerHTML = stackedAreaChartSvg(series, { width: 560, height: 220, padding: { top: 8, right: 12, bottom: 24, left: 40 } });
+  host.innerHTML = overviewStackedAreaSvg(series, { width: 560, height: 220, padding: { top: 8, right: 12, bottom: 24, left: 40 } });
 }
 
 const scheduleOverviewChart = rAFThrottle(() => {
   if (state.currentPage === 'overview') renderOverviewChart();
 });
 
-function stackedAreaChartSvg(rawSeries, opts) {
+function overviewStackedAreaSvg(rawSeries, opts) {
   const { width, height, padding } = opts;
   const all = [...rawSeries.input, ...rawSeries.output, ...rawSeries.cacheRead, ...rawSeries.cacheWrite, ...rawSeries.reasoning];
   if (all.length < 2) return '';
@@ -1182,12 +1183,6 @@ function renderLogs() {
   const filtered = getFilteredLogs();
   const totalH = filtered.length * LOG_ROW_H;
   const viewportH = body.clientHeight || 480;
-
-  // If following and not paused, stay at bottom
-  if (logFollow && !state.paused) {
-    body.scrollTop = body.scrollHeight;
-  }
-
   const scrollTop = body.scrollTop;
   const first = Math.max(0, Math.floor(scrollTop / LOG_ROW_H) - LOG_OVERSCAN);
   const visible = Math.ceil(viewportH / LOG_ROW_H) + LOG_OVERSCAN * 2;
@@ -1203,6 +1198,12 @@ function renderLogs() {
   const totalAll = state.archivedLogs.length + state.recentLogs.length;
   $('#logs-count').textContent = `${fmtNumber(filtered.length)} of ${fmtNumber(totalAll)} entries`;
   $('#logs-status').textContent = state.paused ? 'Paused (buffered)' : 'Live';
+}
+
+function scrollLogToBottom() {
+  const body = $('#log-body');
+  if (!body) return;
+  body.scrollTop = body.scrollHeight;
 }
 
 function renderLogRow(entry, idx) {
@@ -1273,12 +1274,13 @@ function initLogsToolbar() {
     const body = $('#log-body');
     const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
     logFollow = atBottom;
-    ensureLogRender();
+    scheduleLogRender();
   });
   // When unpausing, scroll to bottom
   $('#logs-pause').addEventListener('click', () => {
     if (state.paused) {
       logFollow = true;
+      scrollLogToBottom();
     }
   });
   const ctxMenu = $('#ctx-menu');
