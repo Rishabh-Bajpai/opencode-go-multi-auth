@@ -10,35 +10,52 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 ## Preview
 
-### Overview
+Click any screenshot to view full resolution.
 
-KPI strip, quota-error panel, live token-throughput chart, breakdown, and 30-day usage.
-
-![Overview](resources/overview.png)
-
-### Accounts
-
-Add, enable/drain, reorder, and set priority/weight for each account. Each card shows circuit-breaker state, quota-error tally, token breakdown, latency, error rate, last model, and a live Test button.
-
-![Accounts](resources/accounts.png)
-
-### Routing
-
-Select an active strategy and see its description, best-for recommendation, and cache friendliness.
-
-![Routing](resources/routing.png)
-
-### Tokens
-
-Per-model and per-key time series, category share, observed cost, and 30-day rolling usage.
-
-![Tokens](resources/tokens.png)
-
-### Logs
-
-Virtualized table of every routed request, with search across path/model/key/route reason, filter by level/provider, pause auto-scroll, and right-click to copy fields.
-
-![Logs](resources/logs.png)
+<table>
+  <tr>
+    <td align="center">
+      <a href="resources/overview.png">
+        <img src="resources/overview.png" width="400" alt="Overview">
+      </a>
+      <br>
+      <strong>Overview</strong> — KPI strip, quota-error panel, token throughput chart
+    </td>
+    <td align="center">
+      <a href="resources/accounts.png">
+        <img src="resources/accounts.png" width="400" alt="Accounts">
+      </a>
+      <br>
+      <strong>Accounts</strong> — Key management, priority, masking, live stats
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="resources/routing.png">
+        <img src="resources/routing.png" width="400" alt="Routing">
+      </a>
+      <br>
+      <strong>Routing</strong> — Strategy selection and descriptions
+    </td>
+    <td align="center">
+      <a href="resources/tokens.png">
+        <img src="resources/tokens.png" width="400" alt="Tokens">
+      </a>
+      <br>
+      <strong>Tokens</strong> — Per-model usage, cost, and time series
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="resources/logs.png">
+        <img src="resources/logs.png" width="400" alt="Logs">
+      </a>
+      <br>
+      <strong>Logs</strong> — Routing tape with search, filters, and cost
+    </td>
+    <td></td>
+  </tr>
+</table>
 
 ## Features
 
