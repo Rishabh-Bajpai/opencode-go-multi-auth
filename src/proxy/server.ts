@@ -261,6 +261,7 @@ export class ProxyServer {
                 cooldownMs: headerCooldownMs,
                 quotaError: signal,
                 attempt: attempt + 1,
+                upstream: isZenRequest ? 'zen' : 'go',
               },
             )
 
@@ -294,6 +295,7 @@ export class ProxyServer {
               model: prepared.model,
               strategy,
               routeReason: reason,
+              upstream: isZenRequest ? 'zen' : 'go',
             })
           }
 
@@ -357,6 +359,7 @@ export class ProxyServer {
           tokens: tokens || null,
           cost,
           costEstimated,
+          upstream: isZenRequest ? 'zen' : 'go',
         })
         return
       } catch (err) {
@@ -378,6 +381,7 @@ export class ProxyServer {
           model: prepared.model,
           strategy,
           routeReason: reason,
+          upstream: isZenRequest ? 'zen' : 'go',
         })
       }
     }

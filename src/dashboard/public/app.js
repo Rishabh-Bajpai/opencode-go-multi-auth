@@ -136,7 +136,7 @@ const state = {
   recentLogs: [],          // ring buffer
   archivedLogs: [],        // up to 10000 older entries
   expandedLogId: null,
-  logFilter: { search: '', level: '' },
+  logFilter: { search: '', level: '', provider: '' },
   paused: false,
   pausedBuffer: [],
   logById: new Map(),      // id -> log entry, for finding expanded row
@@ -1140,10 +1140,11 @@ let logPageSize = 250;
 function getFilteredLogs() {
   const search = state.logFilter.search.trim().toLowerCase();
   const level = state.logFilter.level;
+  const provider = state.logFilter.provider;
   // Stored oldest-first; display newest-first.
   const chronological = [...state.archivedLogs, ...state.recentLogs];
   let filtered;
-  if (!search && !level) {
+  if (!search && !level && !provider) {
     filtered = chronological;
   } else {
     filtered = chronological.filter((e) => {
@@ -1152,6 +1153,7 @@ function getFilteredLogs() {
       } else if (level) {
         if ((e.level || 'info') !== level) return false;
       }
+      if (provider && (e.meta?.upstream || '') !== provider) return false;
       if (!search) return true;
       const m = e.meta || {};
       const haystack = [
@@ -1162,6 +1164,7 @@ function getFilteredLogs() {
         m.model || '',
         m.routeReason || '',
         m.statusCode || '',
+        m.upstream || '',
         m.quotaError?.message || '',
       ].join(' ').toLowerCase();
       return haystack.includes(search);
@@ -1199,10 +1202,14 @@ function renderLogRowHTML(entry, idx) {
   const top = idx * LOG_ROW_H;
   const expandedClass = expanded ? ' expanded' : '';
   const quotaClass = isQuota ? ' is-quota' : '';
+  const upstream = m.upstream || '';
+  const upstreamPill = upstream
+    ? ` <span class="upstream-pill upstream-${escapeHtml(upstream)}" title="Routed to ${upstream === 'zen' ? 'OpenCode Zen (free tier)' : 'OpenCode Go (paid)'}">${upstream.toUpperCase()}</span>`
+    : '';
   return `
     <div class="log-row${expandedClass}${quotaClass}" data-log-id="${entry.__id}" data-log-idx="${idx}" style="top:${top}px;">
       <span class="cell time">${escapeHtml(fmtTime(entry.timestamp))}</span>
-      <span class="cell level level-${escapeHtml(entry.level || 'info')}">${escapeHtml((entry.level || 'info').toUpperCase())}${quotaPill}</span>
+      <span class="cell level level-${escapeHtml(entry.level || 'info')}">${escapeHtml((entry.level || 'info').toUpperCase())}${quotaPill}${upstreamPill}</span>
       <span class="cell method">${escapeHtml(m.method || '')}</span>
       <span class="cell path" title="${escapeHtml(m.path || '')}">${escapeHtml(m.path || '')}</span>
       <span class="cell status ${statusClass}">${escapeHtml(status ? String(status) : '')}</span>
@@ -1418,6 +1425,16 @@ function initSearch() {
       $$('#logs-levels .filter-chip').forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
       state.logFilter.level = chip.dataset.level || '';
+      ensureLogRender();
+    });
+  });
+
+  // Provider filter chips (Go / Zen / All)
+  $$('#logs-provider .filter-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      $$('#logs-provider .filter-chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.logFilter.provider = chip.dataset.provider || '';
       ensureLogRender();
     });
   });
