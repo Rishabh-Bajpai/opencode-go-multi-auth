@@ -8,6 +8,55 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 > **💰 Support the project:** Use this referral link to [sign up for OpenCode Go](https://opencode.ai/go?ref=HF6N2D2RCR) and get **$5 free credit** to start. Every referral helps keep this project maintained.
 
+## Preview
+
+Click any screenshot to view full resolution.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="resources/overview.png">
+        <img src="resources/overview.png" width="400" alt="Overview">
+      </a>
+      <br>
+      <strong>Overview</strong> — KPI strip, quota-error panel, token throughput chart
+    </td>
+    <td align="center">
+      <a href="resources/accounts.png">
+        <img src="resources/accounts.png" width="400" alt="Accounts">
+      </a>
+      <br>
+      <strong>Accounts</strong> — Key management, priority, masking, live stats
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="resources/routing.png">
+        <img src="resources/routing.png" width="400" alt="Routing">
+      </a>
+      <br>
+      <strong>Routing</strong> — Strategy selection and descriptions
+    </td>
+    <td align="center">
+      <a href="resources/tokens.png">
+        <img src="resources/tokens.png" width="400" alt="Tokens">
+      </a>
+      <br>
+      <strong>Tokens</strong> — Per-model usage, cost, and time series
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="resources/logs.png">
+        <img src="resources/logs.png" width="400" alt="Logs">
+      </a>
+      <br>
+      <strong>Logs</strong> — Routing tape with search, filters, and cost
+    </td>
+    <td></td>
+  </tr>
+</table>
+
 ## Features
 
 - **Three Routing Strategies** — Priority Failover (cache-first default), Round Robin, Weighted Cycle. Each explained in the dashboard UI.
