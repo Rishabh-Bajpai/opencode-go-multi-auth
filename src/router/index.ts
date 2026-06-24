@@ -87,6 +87,7 @@ export async function createRouter(
 
   logStream = new LogStream(persistRuntimeState)
   mergedConfig.strategy = normalizeRoutingStrategy(configStore.get('strategy') || mergedConfig.strategy)
+  mergedConfig.ntfyUrl = configStore.get('ntfyUrl') || mergedConfig.ntfyUrl
   keyManager = new KeyManager(mergedConfig, persistRuntimeState)
   const circuitBreaker = new CircuitBreaker(mergedConfig.circuitBreakerThreshold)
   quotaTracker = new QuotaTracker(2000, persistRuntimeState)
