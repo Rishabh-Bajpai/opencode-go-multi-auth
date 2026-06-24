@@ -302,6 +302,16 @@
             <p class="page-subtitle">Browse available models and control which ones appear in token charts.</p>
           </div>
         </div>
+        <div class="card" id="zen-drift-card" style="display:none;">
+          <div class="card-head">
+            <h3>Zen provider drift</h3>
+            <span class="panel-meta" id="zen-drift-meta"></span>
+          </div>
+          <div class="card-body">
+            <div id="zen-drift-banner"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-head">
             <h3>Select visible models</h3>
@@ -313,6 +323,7 @@
                 <button class="btn btn-sm" id="models-select-all">Select all</button>
                 <button class="btn btn-sm" id="models-deselect-all">Deselect all</button>
                 <button class="btn btn-primary btn-sm" id="models-save">Save</button>
+                <input class="input zen-provider-input" type="text" id="zen-provider-name" placeholder="provider name (default: multi-auth-zen)" style="max-width: 280px;">
               </div>
             </div>
             <div id="models-list"></div>

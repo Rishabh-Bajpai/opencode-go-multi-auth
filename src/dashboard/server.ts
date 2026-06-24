@@ -1,5 +1,7 @@
 import express from 'express'
+import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { KeyManager } from '../router/key-manager.js'
@@ -19,6 +21,28 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC_DIR = path.join(__dirname, 'public')
+
+const FETCH_TIMEOUT_MS = 8_000
+
+async function fetchJson(url: string, signal: AbortSignal): Promise<{ data?: Array<{ id?: string }> }> {
+  const res = await fetch(url, { signal })
+  if (!res.ok) throw new Error(`upstream returned HTTP ${res.status}`)
+  return res.json() as Promise<{ data?: Array<{ id?: string }> }>
+}
+
+function resolveOpenCodeConfigPath(): string {
+  return process.env.OPENCODE_CONFIG
+    || path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'opencode', 'opencode.json')
+}
+
+function readOpenCodeConfig(): Record<string, unknown> | null {
+  try {
+    const raw = fs.readFileSync(resolveOpenCodeConfigPath(), 'utf8')
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
 
 export class DashboardServer {
   private app: express.Application
@@ -198,17 +222,60 @@ export class DashboardServer {
     this.app.get('/api/models', async (_req, res) => {
       try {
         const proxy = `http://127.0.0.1:${this.proxyPort}`
+        const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS)
         const [goRes, zenRes] = await Promise.allSettled([
-          fetch(`${proxy}/v1/models`).then(r => r.json()),
-          fetch(`${proxy}/zen/v1/models`).then(r => r.json()),
+          fetchJson(`${proxy}/v1/models`, signal).then(j => (j.data || []).map(m => m.id).filter(Boolean) as string[]),
+          fetchJson(`${proxy}/zen/v1/models`, signal).then(j => (j.data || []).map(m => m.id).filter(Boolean) as string[]),
         ])
         res.json({
-          go: goRes.status === 'fulfilled' ? (goRes.value.data || []) : [],
-          zen: zenRes.status === 'fulfilled' ? (zenRes.value.data || []) : [],
+          go: goRes.status === 'fulfilled' ? goRes.value : [],
+          zen: zenRes.status === 'fulfilled' ? zenRes.value : [],
         })
       } catch {
         res.status(500).json({ error: 'Failed to fetch models' })
       }
+    })
+
+    this.app.get('/api/zen-provider-models', async (req, res) => {
+      const providerName = String(req.query.provider || '').trim() || 'multi-auth-zen'
+      const proxy = `http://127.0.0.1:${this.proxyPort}`
+      const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS)
+
+      // Read the configured model list from the user's opencode.json
+      const cfg = readOpenCodeConfig()
+      const providerBlock = (cfg?.provider as Record<string, unknown> | undefined)?.[providerName] as
+        | { models?: Record<string, unknown> }
+        | undefined
+      const configured = providerBlock && providerBlock.models && typeof providerBlock.models === 'object'
+        ? Object.keys(providerBlock.models)
+        : []
+      const providerMissing = !providerBlock
+
+      // Fetch the live catalog from the proxy's /zen/v1/models endpoint
+      let live: string[] = []
+      let liveError: string | null = null
+      try {
+        const json = await fetchJson(`${proxy}/zen/v1/models`, signal)
+        live = (json.data || []).map(m => m.id).filter(Boolean) as string[]
+      } catch (err) {
+        liveError = err instanceof Error ? err.message : String(err)
+      }
+
+      const configuredSet = new Set(configured)
+      const liveSet = new Set(live)
+      const missing = live.filter(m => !configuredSet.has(m)).sort()
+      const stale = configured.filter(m => !liveSet.has(m)).sort()
+
+      res.json({
+        provider: providerName,
+        configured,
+        live,
+        missing,
+        stale,
+        providerMissing,
+        liveError,
+        lastCheckAt: Date.now(),
+      })
     })
 
     this.app.get('/api/visible-models', (_req, res) => {

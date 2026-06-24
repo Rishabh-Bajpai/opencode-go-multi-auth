@@ -131,7 +131,32 @@ Key invariants to preserve:
   the Go upstream (`upstreamUrl`, default `https://opencode.ai/zen/go/v1`).
   The `/zen` prefix is stripped before forwarding. Both upstreams
   support Anthropic and OpenAI formats. Configured in OpenCode as
-  `api: opencode-go` with `baseURL: http://localhost:18905/zen`.
+  a custom provider with `npm: "@ai-sdk/openai-compatible"` (for free
+  Zen models on `/v1/chat/completions`) or `npm: "@ai-sdk/anthropic"`
+  (for paid Zen models on `/v1/messages`) and
+  `baseURL: http://localhost:18905/zen`. The provider name MUST be
+  unique — do NOT use `opencode-zen` or `opencode`, as OpenCode will
+  route those to the built-in provider and bypass the proxy. Use a
+  unique name like `multi-auth-zen` or `proxy-zen`.
+- **Zen model drift detection:** The Models page calls
+  `GET /api/zen-provider-models?provider=<name>` which reads
+  `~/.config/opencode/opencode.json` (honouring `OPENCODE_CONFIG`),
+  fetches the live catalog from the proxy's `/zen/v1/models`, and
+  reports `missing` (live but not configured) and `stale` (configured
+  but no longer in upstream). The Models page shows a banner with
+  a "Copy snippet" action so the user can paste the missing models
+  into their `opencode.json`. A one-shot toast is fired on first
+  detection per session (deduped by drift signature). Re-checks
+  every 12 hours while the Models page is open. The endpoint is
+  resilient to missing files, JSON errors, and upstream fetch
+  failures — all failure modes return a 200 with a sensible
+  `liveError` field rather than 5xx.
+- **Project-local `opencode.json`:** Only the global
+  `~/.config/opencode/opencode.json` is read for drift detection.
+  Project-local configs (cwd-relative) are not currently scanned.
+  If the user has a project-local config, the drift detection will
+  report `providerMissing: true` and prompt them to use the global
+  config or extend the read logic.
 - **Auth headers:** the proxy always sets both `Authorization: Bearer …`
   AND `x-api-key: …` because some Anthropic-style endpoints reject one
   of them. Do not narrow this to a single header.

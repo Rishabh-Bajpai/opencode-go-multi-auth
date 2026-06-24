@@ -117,6 +117,10 @@ const api = {
   setConfig(payload) { return this.req('/api/config', { method: 'PUT', body: payload }); },
   models() { return this.req('/api/models'); },
   visibleModels() { return this.req('/api/visible-models'); },
+  zenProviderModels(provider) {
+    const q = encodeURIComponent(provider || 'multi-auth-zen')
+    return this.req(`/api/zen-provider-models?provider=${q}`)
+  },
   setVisibleModels(payload) { return this.req('/api/visible-models', { method: 'PUT', body: payload }); },
   notifications() { return this.req('/api/notifications'); },
   testKey(id) { return this.req(`/api/keys/${id}/test`, { method: 'POST' }); },
@@ -141,6 +145,9 @@ const state = {
   pausedBuffer: [],
   logById: new Map(),      // id -> log entry, for finding expanded row
   visibleModels: null,     // string[] or null (null = all)
+  zenProviderName: 'multi-auth-zen', // opencode.json provider name for drift detection
+  zenDriftAnnounced: null, // last drift signature announced via toast (per session)
+  zenDriftTimer: null,      // setTimeout handle for 12h re-check
 };
 
 // ---------------------------------------------------------------------------
@@ -156,6 +163,12 @@ const on = (event, handler) => bus.addEventListener(event, handler);
 // ---------------------------------------------------------------------------
 
 function setPage(page) {
+  if (state.currentPage === 'models' && page !== 'models') {
+    if (state.zenDriftTimer) {
+      clearTimeout(state.zenDriftTimer);
+      state.zenDriftTimer = null;
+    }
+  }
   state.currentPage = page;
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.page === page));
   $$('.page').forEach((el) => el.classList.toggle('active', el.dataset.page === page));
@@ -2002,7 +2015,28 @@ function initTokensPage() {
 async function renderModels() {
   const host = $('#models-list');
   if (!host) return;
-  const [modelsData, vm] = await Promise.all([api.models(), api.visibleModels()]);
+
+  // Read the provider name from the input (or fall back to the default).
+  const providerInput = $('#zen-provider-name');
+  if (providerInput && providerInput.value.trim()) {
+    state.zenProviderName = providerInput.value.trim();
+  }
+  const providerName = state.zenProviderName || 'multi-auth-zen';
+
+  const [modelsData, vm, drift] = await Promise.all([
+    api.models(),
+    api.visibleModels(),
+    api.zenProviderModels(providerName).catch((err) => ({
+      provider: providerName,
+      configured: [],
+      live: [],
+      missing: [],
+      stale: [],
+      providerMissing: false,
+      liveError: err instanceof Error ? err.message : String(err),
+      lastCheckAt: Date.now(),
+    })),
+  ]);
   const selected = new Set(vm.models || []);
   state.visibleModels = vm.models || null;
 
@@ -2026,6 +2060,12 @@ async function renderModels() {
   host.innerHTML = goSection + zenSection;
   if (!goSection && !zenSection) host.innerHTML = '<div class="empty-state">Could not fetch model list from the proxy.</div>';
 
+  // Render the drift card and fire a one-shot toast.
+  renderZenDrift(drift);
+
+  // Persist the provider name for the next visit.
+  if (providerInput) providerInput.value = state.zenProviderName;
+
   $('#models-select-all').onclick = () => { $$('.model-check', host).forEach((cb) => cb.checked = true); };
   $('#models-deselect-all').onclick = () => { $$('.model-check', host).forEach((cb) => cb.checked = false); };
   $('#models-save').onclick = async () => {
@@ -2038,6 +2078,128 @@ async function renderModels() {
       toast('Failed to save: ' + (err instanceof Error ? err.message : String(err)), 'error');
     }
   };
+}
+
+function renderZenDrift(drift) {
+  const card = $('#zen-drift-card');
+  const banner = $('#zen-drift-banner');
+  const meta = $('#zen-drift-meta');
+  if (!card || !banner || !meta) return;
+
+  // Schedule the next 12-hour check.
+  if (state.zenDriftTimer) clearTimeout(state.zenDriftTimer);
+  state.zenDriftTimer = setTimeout(() => {
+    if (state.currentPage === 'models') {
+      api.zenProviderModels(state.zenProviderName).then(renderZenDrift).catch(() => {});
+    }
+  }, 12 * 60 * 60 * 1000);
+
+  const ts = drift.lastCheckAt ? new Date(drift.lastCheckAt).toLocaleString() : '—';
+  const providerMissing = drift.providerMissing;
+  const missing = drift.missing || [];
+  const stale = drift.stale || [];
+  const liveError = drift.liveError;
+
+  if (providerMissing) {
+    card.style.display = '';
+    meta.textContent = `Provider "${drift.provider}" not found in opencode.json · last check ${ts}`;
+    banner.innerHTML = `
+      <div class="zen-drift-banner is-error">
+        <strong>Provider not found.</strong>
+        Add a <code>${escapeHtml(drift.provider)}</code> block to your <code>~/.config/opencode/opencode.json</code>
+        under <code>provider</code>. Until then, this page can't tell which models your proxy serves.
+      </div>
+    `;
+    announceDriftToast(drift, 'Provider not found', 'error');
+    return;
+  }
+
+  if (liveError && (!drift.live || drift.live.length === 0)) {
+    card.style.display = '';
+    meta.textContent = `Could not reach upstream · last check ${ts}`;
+    banner.innerHTML = `
+      <div class="zen-drift-banner is-error">
+        <strong>Upstream unreachable.</strong>
+        ${escapeHtml(liveError)} — last check ${ts}. Try again later.
+      </div>
+    `;
+    return;
+  }
+
+  if (missing.length === 0 && stale.length === 0) {
+    card.style.display = 'none';
+    banner.innerHTML = '';
+    meta.textContent = '';
+    // First-time only, when no drift: a positive "all in sync" toast.
+    announceDriftToast(drift, 'Zen catalog in sync', 'success');
+    return;
+  }
+
+  card.style.display = '';
+  meta.textContent = `Last check ${ts}`;
+
+  const missingBlock = missing.length ? `
+    <div class="zen-drift-banner is-warning">
+      <div class="zen-drift-headline">
+        <strong>${missing.length} new model${missing.length === 1 ? '' : 's'} available</strong> from the OpenCode Zen upstream.
+      </div>
+      <div class="zen-drift-list">
+        ${missing.map(m => `<code class="zen-drift-chip">${escapeHtml(m)}</code>`).join('')}
+      </div>
+      <div class="zen-drift-actions">
+        <button class="btn btn-sm btn-primary zen-drift-copy">Copy snippet to paste in opencode.json</button>
+        <span class="zen-drift-hint">Paste this into the <code>"models"</code> map of the <code>${escapeHtml(drift.provider)}</code> provider.</span>
+      </div>
+    </div>
+  ` : '';
+
+  const staleBlock = stale.length ? `
+    <div class="zen-drift-banner is-muted">
+      <div class="zen-drift-headline">
+        <strong>${stale.length} configured model${stale.length === 1 ? '' : 's'}</strong> no longer in the upstream catalog:
+        ${stale.map(m => `<code class="zen-drift-chip">${escapeHtml(m)}</code>`).join(' ')}
+      </div>
+    </div>
+  ` : '';
+
+  banner.innerHTML = missingBlock + staleBlock;
+
+  const copyBtn = banner.querySelector('.zen-drift-copy');
+  if (copyBtn && missing.length) {
+    copyBtn.onclick = () => {
+      const snippet = JSON.stringify({
+        provider: {
+          [drift.provider]: {
+            models: Object.fromEntries(missing.map(m => [m, {}])),
+          },
+        },
+      }, null, 2);
+      navigator.clipboard.writeText(snippet).then(() => {
+        toast(`Copied ${missing.length} model${missing.length === 1 ? '' : 's'} to paste into opencode.json`, 'success');
+      }).catch(() => {
+        toast('Could not copy to clipboard', 'error');
+      });
+    };
+  }
+
+  // Announce (one-shot per signature).
+  if (missing.length > 0) {
+    announceDriftToast(drift, `${missing.length} new Zen model${missing.length === 1 ? '' : 's'} available`, 'info');
+  } else if (stale.length > 0) {
+    announceDriftToast(drift, `${stale.length} Zen model${stale.length === 1 ? '' : 's'} no longer available`, 'warn');
+  }
+}
+
+function announceDriftToast(drift, message, kind) {
+  // Build a stable signature: provider + sorted missing + sorted stale.
+  const sig = [
+    drift.provider,
+    (drift.missing || []).slice().sort().join(','),
+    (drift.stale || []).slice().sort().join(','),
+  ].join('|');
+  if (state.zenDriftAnnounced === sig) return;
+  state.zenDriftAnnounced = sig;
+  toast(message, kind);
 }
 
 async function renderSettings() {
