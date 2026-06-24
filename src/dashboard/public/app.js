@@ -318,7 +318,7 @@ function ingestLog(entry, { initial = false } = {}) {
 
   if (state.currentPage === 'logs') {
     scheduleLogRender();
-    if (logFollow && !state.paused) scrollLogToBottom();
+    if (logFollow && !state.paused) scrollLogToTop();
   }
   if (state.currentPage === 'overview') {
     scheduleOverviewChart();
@@ -1140,28 +1140,35 @@ let logPageSize = 250;
 function getFilteredLogs() {
   const search = state.logFilter.search.trim().toLowerCase();
   const level = state.logFilter.level;
-  const all = [...state.archivedLogs, ...state.recentLogs];
-  if (!search && !level) return all;
-  return all.filter((e) => {
-    if (level === 'quota') {
-      if (!e.meta?.quotaError) return false;
-    } else if (level) {
-      if ((e.level || 'info') !== level) return false;
-    }
-    if (!search) return true;
-    const m = e.meta || {};
-    const haystack = [
-      e.message || '',
-      m.path || '',
-      m.method || '',
-      m.keyAlias || '',
-      m.model || '',
-      m.routeReason || '',
-      m.statusCode || '',
-      m.quotaError?.message || '',
-    ].join(' ').toLowerCase();
-    return haystack.includes(search);
-  });
+  // Stored oldest-first; display newest-first.
+  const chronological = [...state.archivedLogs, ...state.recentLogs];
+  let filtered;
+  if (!search && !level) {
+    filtered = chronological;
+  } else {
+    filtered = chronological.filter((e) => {
+      if (level === 'quota') {
+        if (!e.meta?.quotaError) return false;
+      } else if (level) {
+        if ((e.level || 'info') !== level) return false;
+      }
+      if (!search) return true;
+      const m = e.meta || {};
+      const haystack = [
+        e.message || '',
+        m.path || '',
+        m.method || '',
+        m.keyAlias || '',
+        m.model || '',
+        m.routeReason || '',
+        m.statusCode || '',
+        m.quotaError?.message || '',
+      ].join(' ').toLowerCase();
+      return haystack.includes(search);
+    });
+  }
+  // Reverse for display: latest at index 0, oldest at the bottom.
+  return filtered.slice().reverse();
 }
 
 function ensureLogRender() {
@@ -1266,10 +1273,10 @@ function renderLogs() {
   rowsHost.innerHTML = slice.map((entry, i) => renderLogRowHTML(entry, first + i)).join('');
 }
 
-function scrollLogToBottom() {
+function scrollLogToTop() {
   const body = $('#log-body');
   if (!body) return;
-  body.scrollTop = body.scrollHeight;
+  body.scrollTop = 0;
 }
 
 function initLogsToolbar() {
@@ -1282,7 +1289,7 @@ function initLogsToolbar() {
         for (const e of state.pausedBuffer) ingestLog(e, { initial: true });
         state.pausedBuffer = [];
       }
-      if (logMode === 'virtualized') scrollLogToBottom();
+      if (logMode === 'virtualized') scrollLogToTop();
     }
     ensureLogRender();
   });
@@ -1318,8 +1325,9 @@ function initLogsToolbar() {
     if (logMode !== 'virtualized') return;
     const el = $('#log-body');
     if (!el) return;
-    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-    logFollow = atBottom;
+    // Latest logs are at the top, so "following" means staying at scrollTop near 0.
+    const atTop = el.scrollTop <= 40;
+    logFollow = atTop;
     if (scrollRaf) return;
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = 0;
