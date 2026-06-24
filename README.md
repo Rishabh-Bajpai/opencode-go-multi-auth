@@ -1,19 +1,22 @@
 # OpenCode Go Multi-Account Router
 
-A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCode Go API subscriptions into a single endpoint. It routes requests across accounts using cache-aware or load-spreading strategies, auto-starts with OpenCode in plugin mode, and includes a persistent control-room dashboard for key management, usage analytics, and live observability.
+A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCode Go + Zen API subscriptions into a single endpoint. It routes requests across accounts using cache-aware or load-spreading strategies, auto-starts with OpenCode in plugin mode, and includes a persistent control-room dashboard for key management, usage analytics, and live observability.
 
 ## Features
 
 - **Three Routing Strategies** — Priority Failover (cache-first default), Round Robin, Weighted Cycle. Each explained in the dashboard UI.
+- **Dual upstream** — Same proxy serves OpenCode Go (paid) and OpenCode Zen (free tier). Requests with a `/zen/` path prefix are forwarded to `https://opencode.ai/zen/v1`; everything else goes to `https://opencode.ai/zen/go/v1`. Both upstreams share keys, priority, weight, cooldown, and circuit breaker.
 - **React, don't predict** — The router does **not** estimate quota. It only marks a key as exhausted when the upstream itself returns 402/429 with a quota body, and uses the upstream-supplied cooldown. Cost is recorded for display only.
+- **Cost estimation** — The OpenCode Go upstream does not return a `cost` field, so the proxy falls back to a per-model rate card sourced from the OpenCode Go docs. Estimated costs render in yellow italic with a `~` prefix and a tooltip; actual upstream costs render plain. Tiered pricing (Qwen3.6/3.7 Plus, Qwen3.7 Max) applies the higher tier when `cacheRead + input > 256_000` tokens.
+- **Zen model drift detection** — The Models page compares the user's `opencode.json` config against the live Zen upstream catalog. A banner lists new free models not yet in the user's config with a "Copy snippet" button so the user can paste them in. Re-checks every 12 hours while the page is open.
 - **Persistent Key Settings** — Enable/drain, priority, weight, and alias survive restarts. Keys are stored with stable IDs and encrypted at rest.
 - **Per-Key Analytics** — Request count, success/error rate, average latency, token breakdown, last model used, last session ID, observed cost, and quota-error tally.
 - **Stream-Aware Usage Tracking** — Parses token usage from both full JSON and SSE streaming completions. Injects `stream_options.include_usage` for OpenAI-compatible streams.
 - **Circuit Breaker** — Temporarily removes unhealthy keys after 3 consecutive 5xx errors, auto-recovers after 5 minutes.
 - **Cache-Preserving Header Passthrough** — Forwards `X-Session-Id`, `prompt_cache_key` / `prompt-cache-key`, `cache_control` / `cache-control`, plus both bearer and `x-api-key` auth for broader model compatibility.
-- **Local Web UI Control Room** — Strategy explainer, key deck with inline editing, live usage ledger, quota-error panel, routing tape with per-request route reasons and session IDs.
+- **Local Web UI Control Room** — Strategy explainer, key deck with inline editing, live usage ledger, quota-error panel, routing tape with per-request route reasons and session IDs, model catalog with visibility controls, and a drift detection banner.
 - **Secure Key Storage** — AES-256-GCM encrypted at rest using PBKDF2-derived key from machine identity.
-- **Push Notifications** — Optional ntfy notifications for key exhaustion, all-keys-exhausted, and circuit-breaker trips/recovery.
+- **Push Notifications** — Optional ntfy notifications for key exhaustion, all-keys-exhausted, and circuit-breaker trips/recovery. Configurable from the dashboard Settings page with hot-reload.
 - **Auto-Starting OpenCode Plugin** — Install as an OpenCode plugin so the proxy and dashboard start with OpenCode automatically.
 - **Standalone or Library** — Keep a CLI/server mode for debugging, fallback use, or external automation.
 
@@ -21,7 +24,7 @@ A native TypeScript OpenCode plugin and proxy router that pools multiple OpenCod
 
 - **Node.js** >= 18 (LTS recommended)
 - **npm** or **bun** or **pnpm**
-- **OpenCode CLI** installed and configured with a Go subscription
+- **OpenCode CLI** installed and configured with a Go subscription (Zen is optional but recommended)
 
 ## Installation
 
@@ -52,7 +55,7 @@ Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your lo
 
 ### OpenCode config
 
-Add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.opencode/opencode.json`:
+Add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -113,6 +116,53 @@ In standalone mode you must start the router yourself after reboot. Plugin mode 
 - Some OpenCode Go models use `/messages` with Anthropic-style auth. The proxy now forwards both `Authorization: Bearer ...` and `x-api-key` to maximize compatibility.
 - If a new model still fails, capture the exact model name and the `/messages` or `/chat/completions` path from the router log.
 
+## Dual upstream: Go and Zen through the same proxy
+
+The proxy serves both **OpenCode Go** (paid subscription) and **OpenCode Zen** (free tier + paid models) from the same `localhost:18905`. Requests whose path starts with `/zen/` are forwarded to `https://opencode.ai/zen/v1`; everything else goes to `https://opencode.ai/zen/go/v1`. The `/zen/` prefix is stripped before forwarding.
+
+Both upstreams support Anthropic-format (`/v1/messages`) and OpenAI-format (`/v1/chat/completions`) requests. The free Zen models use the OpenAI format, so add a **second** custom provider alongside the built-in `opencode-go` you already set up:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-go-multi-auth/plugin"],
+  "provider": {
+    "opencode-go": {
+      "options": { "baseURL": "http://localhost:18905" },
+      "models": { "deepseek-v4-flash": {} }
+    },
+    "multi-auth-zen": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OpenCode Zen (multi-auth)",
+      "options": { "baseURL": "http://localhost:18905/zen" },
+      "models": {
+        "deepseek-v4-flash-free": {},
+        "mimo-v2.5-free": {},
+        "qwen3.6-plus-free": {},
+        "minimax-m3-free": {},
+        "nemotron-3-ultra-free": {},
+        "north-mini-code-free": {}
+      }
+    }
+  }
+}
+```
+
+Then reference the provider from agents as `multi-auth-zen/<model>`, e.g.
+
+```json
+{
+  "agent": {
+    "explore": { "model": "multi-auth-zen/deepseek-v4-flash-free" },
+    "general": { "model": "multi-auth-zen/deepseek-v4-flash-free" }
+  }
+}
+```
+
+**Important:** the provider name must be unique. Do **not** use `opencode-zen` or `opencode` — those collide with OpenCode's built-in Zen provider and OpenCode will silently route requests directly to `opencode.ai`, bypassing the proxy entirely. Any other name (e.g. `multi-auth-zen`, `proxy-zen`, `my-zen`) works.
+
+When new free models appear upstream, the dashboard's **Models** page surfaces a drift banner with a **Copy snippet** button so you can paste the missing models into your `models` block. The check runs every 12 hours while the page is open. You can also change the provider name tracked by the dashboard via the text input next to the Save button (default: `multi-auth-zen`).
+
 ## Routing Strategies
 
 All strategies are explained in the dashboard UI. Here is a quick reference:
@@ -141,13 +191,15 @@ Each log entry now includes rich metadata visible in the UI and file logs:
 
 ## Dashboard Control Room
 
-The dashboard is organized into five pages:
+The dashboard is organized into seven pages:
 
-1. **Overview** — KPI strip (enabled / active / cooldown / requests / quota errors), an "Errors told us" panel listing the keys the upstream has marked exhausted (with the upstream's reset time and message), the live token-throughput chart, and the per-window token breakdown.
-2. **Accounts** — Add, enable/drain, reorder (drag), and set priority/weight for each account. Each card shows its quota-error tally, last quota error (status code, message, retry time), token breakdown, latency, and last model. Persistent to disk.
+1. **Overview** — KPI strip (enabled / active / cooldown / requests / quota errors), an "Errors told us" panel listing the keys the upstream has marked exhausted (with the upstream's reset time and message), the live token-throughput chart, a model distribution donut, and the per-window token breakdown.
+2. **Accounts** — Add, enable/drain, reorder (drag), and set priority/weight for each account. Each card shows its circuit-breaker state, quota-error tally, last quota error (status code, message, retry time), token breakdown, latency, error rate, last model, and a "Test" button that fires a live request through the proxy. Persistent to disk.
 3. **Strategy Console** — Select an active strategy and see its description, best-for recommendation, cache friendliness, and behavior.
-4. **Logs** — Virtualized table of every routed request. Search across path / model / key / route reason. Filter by level or "Quota only". Click a row to see the full metadata.
-5. **Settings** — Active config (ports, strategy, total tokens observed, total observed cost, quota errors caught) and the provider config snippet to copy into `~/.opencode/opencode.json`.
+4. **Tokens** — Per-model and per-key time series, category share, observed cost, and 30-day rolling usage.
+5. **Logs** — Virtualized table of every routed request, with the latest entry at the top. Search across path / model / key / route reason, filter by level / "Quota only" / provider (Go / Zen / All), pause auto-scroll, paginate for long histories, right-click to copy fields, click a row to see the full metadata.
+6. **Models** — Browse the combined model catalog from both upstreams. Select which models show in the token charts. A drift banner lists free Zen models the upstream offers that are not in your `opencode.json` and provides a "Copy snippet" button to paste them in.
+7. **Settings** — Active config (ports, strategy, total tokens observed, total observed cost, quota errors caught), the notification URL (ntfy.sh), the notification log, and the provider config snippet to copy into `~/.config/opencode/opencode.json`.
 
 ## Configuration
 

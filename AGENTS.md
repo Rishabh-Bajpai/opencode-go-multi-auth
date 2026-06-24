@@ -42,7 +42,9 @@ Add new tooling only after confirming with the user.
 - The **daemon entry** is `src/bin.ts` (compiled to `dist/bin.js`). The
   daemon listens on:
   - `18905` — the proxy / API endpoint (this is what opencode points at
-    via `provider.opencode-go.options.baseURL` or `provider.opencode-zen.options.baseURL`)
+    via `provider.opencode-go.options.baseURL` and any custom
+    `provider.<name>.options.baseURL` ending in `/zen` for the Zen
+    upstream; see the Dual upstream section below)
   - `18904` — the dashboard web UI
 - The daemon is **detached** and **shared across opencode sessions**.
   Closing the opencode UI does **not** stop the daemon. Killing the
@@ -138,6 +140,38 @@ Key invariants to preserve:
   unique — do NOT use `opencode-zen` or `opencode`, as OpenCode will
   route those to the built-in provider and bypass the proxy. Use a
   unique name like `multi-auth-zen` or `proxy-zen`.
+
+  **Recommended `opencode.json` config for the free Zen tier:**
+
+  ```json
+  {
+    "provider": {
+      "opencode-go": {
+        "options": { "baseURL": "http://localhost:18905" },
+        "models": { "deepseek-v4-flash": {} }
+      },
+      "multi-auth-zen": {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "OpenCode Zen (multi-auth)",
+        "options": { "baseURL": "http://localhost:18905/zen" },
+        "models": {
+          "deepseek-v4-flash-free": {},
+          "mimo-v2.5-free": {},
+          "qwen3.6-plus-free": {},
+          "minimax-m3-free": {},
+          "nemotron-3-ultra-free": {},
+          "north-mini-code-free": {}
+        }
+      }
+    }
+  }
+  ```
+
+  Reference the provider from agents as `multi-auth-zen/<model>`, e.g.
+  `"model": "multi-auth-zen/deepseek-v4-flash-free"`. Adding new free
+  models: the dashboard's Models page shows a drift banner with a
+  "Copy snippet" button that produces a JSON fragment to paste into
+  the `models` block — see "Zen model drift detection" below.
 - **Zen model drift detection:** The Models page calls
   `GET /api/zen-provider-models?provider=<name>` which reads
   `~/.config/opencode/opencode.json` (honouring `OPENCODE_CONFIG`),
