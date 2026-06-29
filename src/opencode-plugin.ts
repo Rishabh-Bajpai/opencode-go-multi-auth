@@ -116,7 +116,12 @@ function spawnRouterDaemon(): number {
     return 0
   }
 
-  const child = spawn(process.execPath, [entry], {
+  // process.execPath may be 'npx' when loaded via some plugin loaders
+  const nodeBin = path.basename(process.execPath) === 'node'
+    ? process.execPath
+    : 'node'
+
+  const child = spawn(nodeBin, [entry], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env: {
