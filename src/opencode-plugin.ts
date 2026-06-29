@@ -107,9 +107,16 @@ function getDaemonEntry(): string {
 
 function spawnRouterDaemon(): number {
   const { bootstrapLogFile } = getRuntimePaths()
+  const entry = getDaemonEntry()
   const logFd = fs.openSync(bootstrapLogFile, 'a')
-  const child = spawn(process.execPath, [getDaemonEntry()], {
-    cwd: path.join(__dirname, '..'),
+
+  if (!fs.existsSync(entry)) {
+    fs.writeSync(logFd, `Error: Daemon entry not found at ${entry}\n`)
+    fs.closeSync(logFd)
+    return 0
+  }
+
+  const child = spawn(process.execPath, [entry], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env: {
@@ -118,6 +125,14 @@ function spawnRouterDaemon(): number {
     },
   })
   fs.closeSync(logFd)
+
+  child.on('error', (err) => {
+    const { bootstrapLogFile: logFile } = getRuntimePaths()
+    try {
+      fs.appendFileSync(logFile, `Error: spawn failed — ${err.message}\n`)
+    } catch { /* ignore */ }
+  })
+
   child.unref()
   return child.pid ?? 0
 }
@@ -151,13 +166,24 @@ async function ensureRouterDaemon(): Promise<'reused' | 'started' | 'failed'> {
     const { pidFile } = getRuntimePaths()
     try {
       if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile)
+    } catch { /* ignore */ }
+  }
+
+  const { bootstrapLockFile } = getRuntimePaths()
+  if (fs.existsSync(bootstrapLockFile)) {
+    try {
+      const lockPid = Number(fs.readFileSync(bootstrapLockFile, 'utf8').trim())
+      if (!isProcessAlive(lockPid)) {
+        logToFile('warn', 'Removing stale bootstrap lock from dead process.', { pid: lockPid })
+        fs.unlinkSync(bootstrapLockFile)
+      }
     } catch {
-      // Best-effort cleanup only.
+      fs.unlinkSync(bootstrapLockFile)
     }
   }
 
   if (!tryAcquireBootstrapLock()) {
-    const waited = await waitForRouterHealthy(10_000)
+    const waited = await waitForRouterHealthy(30_000)
     if (waited.healthy) {
       const state = readPidState()
       logToFile('info', 'Router daemon became healthy while waiting for another bootstrapper.', {
@@ -180,6 +206,14 @@ async function ensureRouterDaemon(): Promise<'reused' | 'started' | 'failed'> {
     }
 
     const pid = spawnRouterDaemon()
+    if (pid === 0) {
+      logToFile('error', 'Failed to spawn router daemon (daemon entry not found).', {
+        daemonEntry: getDaemonEntry(),
+        bootstrapLogTail: readBootstrapLogTail(),
+      })
+      return 'failed'
+    }
+
     logToFile('info', 'Started router daemon bootstrap.', {
       pid,
       dashboardPort: getDashboardPort(),
@@ -187,7 +221,7 @@ async function ensureRouterDaemon(): Promise<'reused' | 'started' | 'failed'> {
       healthUrl: getHealthUrl(),
     })
 
-    const waited = await waitForRouterHealthy(10_000, pid)
+    const waited = await waitForRouterHealthy(30_000, pid)
     if (!waited.healthy) {
       logToFile('error', waited.childExited
         ? 'Router daemon exited before becoming healthy.'
@@ -197,6 +231,16 @@ async function ensureRouterDaemon(): Promise<'reused' | 'started' | 'failed'> {
         proxyPort: getProxyPort(),
         bootstrapLogTail: readBootstrapLogTail(),
       })
+
+      if (waited.childExited) {
+        const { bootstrapLockFile: lockFile } = getRuntimePaths()
+        if (fs.existsSync(lockFile)) {
+          try { fs.unlinkSync(lockFile) } catch { /* ignore */ }
+        }
+        logToFile('info', 'Retrying daemon start after cleaning stale state.')
+        return ensureRouterDaemon()
+      }
+
       return 'failed'
     }
 
