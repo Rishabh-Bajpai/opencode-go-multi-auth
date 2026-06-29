@@ -25,7 +25,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "node scripts/check-node.js && npm run build",
     "dev": "tsx watch src/bin.ts",
     "build": "node node_modules/typescript/lib/tsc.js && cp -r src/dashboard/public/. dist/dashboard/public/",
     "start": "node dist/bin.js",
