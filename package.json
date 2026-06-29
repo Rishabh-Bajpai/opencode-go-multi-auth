@@ -25,12 +25,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "preinstall": "node scripts/check-node.js",
-    "prepare": "npm run build",
+    "prepare": "node scripts/check-node.js && npm run build",
     "dev": "tsx watch src/bin.ts",
-    "build": "npx --no tsc && cp -r src/dashboard/public/. dist/dashboard/public/",
+    "build": "node ./node_modules/.bin/tsc && cp -r src/dashboard/public/. dist/dashboard/public/",
     "start": "node dist/bin.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node ./node_modules/.bin/tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -57,7 +56,7 @@
     }
   },
   "engines": {
-    "node": ">=22.22.2"
+    "node": ">=22"
   },
   "license": "MIT"
 }

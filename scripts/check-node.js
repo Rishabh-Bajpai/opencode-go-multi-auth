@@ -1,4 +1,4 @@
-const REQUIRED = [22, 22, 2];
+const REQUIRED = [22, 0, 0];
 const current = process.versions.node.split('.').map(Number);
 
 const ok =
