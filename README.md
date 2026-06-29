@@ -151,16 +151,16 @@ Navigate to **[http://localhost:18904](http://localhost:18904)** in your browser
 
 ### Standalone mode (fallback)
 
-If you do not want plugin mode, you can still run the router manually using the global CLI:
-
-```bash
-opencode-go-router
-```
-
-Or from a local clone:
+If you do not want plugin mode, you can still run the router manually:
 
 ```bash
 npm start
+```
+
+Or directly:
+
+```bash
+node dist/bin.js
 ```
 
 In standalone mode you must start the router yourself after reboot. Plugin mode avoids manual startup when opening OpenCode, but it is not an OS boot service.
@@ -182,12 +182,10 @@ npm run build
 
 The proxy serves both **OpenCode Go** (paid subscription) and **OpenCode Zen** (free tier + paid models) from the same `localhost:18905`. Requests whose path starts with `/zen/` are forwarded to `https://opencode.ai/zen/v1`; everything else goes to `https://opencode.ai/zen/go/v1`. The `/zen/` prefix is stripped before forwarding.
 
-Both upstreams support Anthropic-format (`/v1/messages`) and OpenAI-format (`/v1/chat/completions`) requests. The free Zen models use the OpenAI format, so add a **second** custom provider alongside the built-in `opencode-go` you already set up:
+Both upstreams support Anthropic-format (`/v1/messages`) and OpenAI-format (`/v1/chat/completions`) requests. The free Zen models use the OpenAI format, so add a **second** custom provider alongside the built-in `opencode-go` you already set up (see the [Installation config](#opencode-config) for the full example):
 
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-go-multi-auth/plugin"],
   "provider": {
     "opencode-go": {
       "options": { "baseURL": "http://localhost:18905" },
@@ -267,7 +265,7 @@ The dashboard is organized into seven pages:
 
 ### Environment variables
 
-Copy `.env.example` to `.env` and adjust as needed:
+Set these in your shell or service file. The app reads from `process.env` — it does not auto-load a `.env` file.
 
 | Variable | Default | Description |
 |---|---|---|
