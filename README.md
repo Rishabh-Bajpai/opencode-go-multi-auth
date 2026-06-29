@@ -83,10 +83,6 @@ Click any screenshot to view full resolution.
 
 ## Installation
 
-There are two ways to install the plugin. Pick whichever suits your workflow.
-
-### Option 1: Clone and build locally
-
 ```bash
 git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
 cd opencode-go-multi-auth
@@ -100,42 +96,42 @@ EOF
 
 The cloned repo must stay — the plugin loader points to its `dist/` directory.
 
-### Option 2: Plugins directory (manual)
-
-If you prefer to write the loader path yourself instead of using `$(pwd)`:
-
-```bash
-git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
-cd opencode-go-multi-auth
-npm install
-npm run build
-mkdir -p ~/.config/opencode/plugins
-cat > ~/.config/opencode/plugins/opencode-go-multi-auth.js <<'EOF'
-export { default, server, pluginModule } from "/absolute/path/to/opencode-go-multi-auth/dist/opencode-plugin.js"
-EOF
-```
-
-Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your local clone. Keep the clone — the loader references it at runtime.
-
 ### OpenCode config
 
-After installing, add the proxy as a base URL override for the built-in `opencode-go` provider in `~/.config/opencode/opencode.json`:
+Add providers that route through the proxy in `~/.config/opencode/opencode.json`:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-go-multi-auth/plugin"],
   "provider": {
     "opencode-go": {
       "options": {
         "baseURL": "http://localhost:18905"
+      },
+      "models": {
+        "deepseek-v4-flash": {}
+      }
+    },
+    "multi-auth-zen": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OpenCode Zen (multi-auth)",
+      "options": {
+        "baseURL": "http://localhost:18905/zen"
+      },
+      "models": {
+        "deepseek-v4-flash-free": {},
+        "mimo-v2.5-free": {},
+        "qwen3.6-plus-free": {},
+        "minimax-m3-free": {},
+        "nemotron-3-ultra-free": {},
+        "north-mini-code-free": {}
       }
     }
   }
 }
 ```
 
-If you used Option 2 (plugins directory), you can leave `plugin` out of the config — local plugin files in `~/.config/opencode/plugins/` are auto-loaded.
+The loader file in `~/.config/opencode/plugins/` is auto-loaded — no `plugin` array needed in the config.
 
 Then close any existing OpenCode sessions and open a fresh one. The plugin will start or reuse one shared local router daemon, which serves:
 
