@@ -1,4 +1,4 @@
-import express from 'express'
+import express, { type NextFunction, type Request, type Response } from 'express'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -8,6 +8,7 @@ import type { KeyManager } from '../router/key-manager.js'
 import type { CircuitBreaker } from '../router/circuit-breaker.js'
 import type { QuotaTracker } from '../router/quota-tracker.js'
 import { LogStream } from '../logging/log-stream.js'
+import { logToFile } from '../logging/logger.js'
 import { SecureStore } from '../storage/secure-store.js'
 import { ConfigStore } from '../storage/config-store.js'
 import { NtfyNotifier } from '../notification/ntfy.js'
@@ -42,6 +43,12 @@ function readOpenCodeConfig(): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+type AsyncHandler = (req: express.Request<any>, res: Response, next: NextFunction) => Promise<void>
+
+function wrap(handler: AsyncHandler): express.RequestHandler {
+  return (req, res, next) => handler(req as any, res, next).catch(next)
 }
 
 export class DashboardServer {
@@ -83,11 +90,11 @@ export class DashboardServer {
       })
     })
 
-    this.app.get('/api/keys', async (_req, res) => {
+    this.app.get('/api/keys', wrap(async (_req, res) => {
       res.json(this.serializeKeys())
-    })
+    }))
 
-    this.app.post('/api/keys', async (req, res) => {
+    this.app.post('/api/keys', wrap(async (req, res) => {
       const { key, alias, priority, weight, enabled } = req.body
       if (!key || typeof key !== 'string') {
         res.status(400).json({ error: 'Key is required' })
@@ -101,9 +108,9 @@ export class DashboardServer {
       })
       await this.persistKeys()
       res.json(this.serializeKey(entry))
-    })
+    }))
 
-    this.app.put('/api/keys/reorder', async (req, res) => {
+    this.app.put('/api/keys/reorder', wrap(async (req, res) => {
       const order = Array.isArray(req.body?.order) ? req.body.order.filter((v: unknown) => typeof v === 'string') : null
       if (!order) {
         res.status(400).json({ error: 'order must be an array of key ids' })
@@ -116,9 +123,9 @@ export class DashboardServer {
       }
       await this.persistKeys()
       res.json(this.serializeKeys())
-    })
+    }))
 
-    this.app.put('/api/keys/:id/toggle', async (req, res) => {
+    this.app.put('/api/keys/:id/toggle', wrap(async (req, res) => {
       const enabled = typeof req.body?.enabled === 'boolean'
         ? req.body.enabled
         : !this.keyManager.getKeyById(req.params.id)?.enabled
@@ -131,9 +138,9 @@ export class DashboardServer {
 
       await this.persistKeys()
       res.json(this.serializeKey(updated))
-    })
+    }))
 
-    this.app.post('/api/keys/:id/reset-cooldown', (req, res) => {
+    this.app.post('/api/keys/:id/reset-cooldown', wrap(async (req, res) => {
       const key = this.keyManager.getKeyById(req.params.id)
       if (!key) {
         res.status(404).json({ error: 'Key not found' })
@@ -142,9 +149,9 @@ export class DashboardServer {
 
       this.keyManager.resetCooldown(req.params.id)
       res.json(this.serializeKey(key))
-    })
+    }))
 
-    this.app.put('/api/keys/:id/key', async (req, res) => {
+    this.app.put('/api/keys/:id/key', wrap(async (req, res) => {
       const newKey = typeof req.body?.key === 'string' ? req.body.key : ''
       if (!newKey.trim()) {
         res.status(400).json({ error: 'Key is required' })
@@ -157,9 +164,9 @@ export class DashboardServer {
       }
       await this.persistKeys()
       res.json(this.serializeKey(updated))
-    })
+    }))
 
-    this.app.put('/api/keys/:id', async (req, res) => {
+    this.app.put('/api/keys/:id', wrap(async (req, res) => {
       const { alias, enabled, priority, weight } = req.body ?? {}
       const updated = this.keyManager.updateKeySettings(req.params.id, {
         alias,
@@ -174,9 +181,9 @@ export class DashboardServer {
 
       await this.persistKeys()
       res.json(this.serializeKey(updated))
-    })
+    }))
 
-    this.app.delete('/api/keys/:id', async (req, res) => {
+    this.app.delete('/api/keys/:id', wrap(async (req, res) => {
       const key = this.keyManager.getKeyById(req.params.id)
       if (!key) {
         res.status(404).json({ error: 'Key not found' })
@@ -186,7 +193,7 @@ export class DashboardServer {
       this.keyManager.removeKey(req.params.id)
       await this.secureStore.removeKey(req.params.id)
       res.json({ success: true })
-    })
+    }))
 
     this.app.get('/api/strategy', (_req, res) => {
       const strategy = normalizeRoutingStrategy(this.configStore.get('strategy'))
@@ -344,6 +351,14 @@ export class DashboardServer {
 
     this.app.get('/api/logs', (_req, res) => {
       res.json(this.logStream.getRecentLogs())
+    })
+
+    this.app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+      const message = err instanceof Error ? err.message : String(err)
+      logToFile('error', 'API error', { error: message })
+      if (!res.headersSent) {
+        res.status(500).json({ error: message })
+      }
     })
   }
 
