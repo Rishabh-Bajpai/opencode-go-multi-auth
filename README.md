@@ -81,28 +81,11 @@ Click any screenshot to view full resolution.
 - **npm** or **bun** or **pnpm**
 - **OpenCode CLI** installed and configured with a Go subscription (Zen is optional but recommended)
 
-> **npm EACCES error?** If `npm install -g` fails with `permission denied`, configure npm to use a user-writable global prefix:
-> ```bash
-> npm config set prefix ~/.npm-global
-> echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
-> source ~/.bashrc
-> ```
-> Then re-run the install. Alternatively, use [nvm](https://github.com/nvm-sh/nvm) which handles this automatically.
-
 ## Installation
 
-There are three ways to install the plugin. Pick whichever suits your workflow.
+There are two ways to install the plugin. Pick whichever suits your workflow.
 
-### Option 1: Install directly from GitHub (no manual clone)
-
-This is the quickest path. The `prepare` script auto-builds the project during install.
-
-```bash
-npm install -g https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
-opencode plugin opencode-go-multi-auth/plugin --global
-```
-
-### Option 2: Clone and build locally
+### Option 1: Clone and build locally
 
 ```bash
 git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
@@ -112,7 +95,13 @@ npm run build
 opencode plugin opencode-go-multi-auth/plugin --global
 ```
 
-### Option 3: Plugins directory (manual)
+When you're done, clean up the cloned repo:
+
+```bash
+cd .. && rm -rf opencode-go-multi-auth
+```
+
+### Option 2: Plugins directory (manual)
 
 If the `opencode plugin` command does not work in your setup, copy the loader file manually:
 
@@ -125,9 +114,10 @@ mkdir -p ~/.config/opencode/plugins
 cat > ~/.config/opencode/plugins/opencode-go-multi-auth.js <<'EOF'
 export { default, server, pluginModule } from "/absolute/path/to/opencode-go-multi-auth/dist/opencode-plugin.js"
 EOF
+cd .. && rm -rf opencode-go-multi-auth
 ```
 
-Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your local clone.
+Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your local clone (before it was removed).
 
 ### OpenCode config
 
