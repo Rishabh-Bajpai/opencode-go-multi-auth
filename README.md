@@ -77,7 +77,7 @@ Click any screenshot to view full resolution.
 
 ## Prerequisites
 
-- **Node.js** >= 22.22.2 (required by transitive dependencies)
+- **Node.js** >= 22 (required by transitive dependencies)
 - **npm** or **bun** or **pnpm**
 - **OpenCode CLI** installed and configured with a Go subscription (Zen is optional but recommended)
 

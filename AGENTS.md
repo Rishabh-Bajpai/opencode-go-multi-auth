@@ -279,7 +279,7 @@ is the upstream itself.
 ## Style and conventions
 
 - TypeScript `strict: true`, `target: ES2022`, `module: Node16`. The
-  build emits `.js` + `.d.ts` + source maps. The runtime is Node 22.22.2+.
+  build emits `.js` + `.d.ts` + source maps. The runtime is Node 22+.
 - ESM imports use the explicit `.js` extension even when the source
   is `.ts` (Node16 module-resolution requirement).
 - Avoid adding new runtime dependencies without a strong reason — the
