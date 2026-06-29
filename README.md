@@ -92,18 +92,17 @@ git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
 cd opencode-go-multi-auth
 npm install
 npm run build
-opencode plugin opencode-go-multi-auth/plugin --global
+mkdir -p ~/.config/opencode/plugins
+cat > ~/.config/opencode/plugins/opencode-go-multi-auth.js <<EOF
+export { default, server, pluginModule } from "$(pwd)/dist/opencode-plugin.js"
+EOF
 ```
 
-When you're done, clean up the cloned repo:
-
-```bash
-cd .. && rm -rf opencode-go-multi-auth
-```
+The cloned repo must stay — the plugin loader points to its `dist/` directory.
 
 ### Option 2: Plugins directory (manual)
 
-If the `opencode plugin` command does not work in your setup, copy the loader file manually:
+If you prefer to write the loader path yourself instead of using `$(pwd)`:
 
 ```bash
 git clone https://github.com/Rishabh-Bajpai/opencode-go-multi-auth.git
@@ -114,10 +113,9 @@ mkdir -p ~/.config/opencode/plugins
 cat > ~/.config/opencode/plugins/opencode-go-multi-auth.js <<'EOF'
 export { default, server, pluginModule } from "/absolute/path/to/opencode-go-multi-auth/dist/opencode-plugin.js"
 EOF
-cd .. && rm -rf opencode-go-multi-auth
 ```
 
-Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your local clone (before it was removed).
+Replace `/absolute/path/to/opencode-go-multi-auth` with the real path to your local clone. Keep the clone — the loader references it at runtime.
 
 ### OpenCode config
 
@@ -137,7 +135,7 @@ After installing, add the proxy as a base URL override for the built-in `opencod
 }
 ```
 
-If you used Option 3 (plugins directory), you can leave `plugin` out of the config — local plugin files in `~/.config/opencode/plugins/` are auto-loaded.
+If you used Option 2 (plugins directory), you can leave `plugin` out of the config — local plugin files in `~/.config/opencode/plugins/` are auto-loaded.
 
 Then close any existing OpenCode sessions and open a fresh one. The plugin will start or reuse one shared local router daemon, which serves:
 
