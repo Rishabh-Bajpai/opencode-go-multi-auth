@@ -27,9 +27,9 @@
   "scripts": {
     "prepare": "node scripts/check-node.js && npm run build",
     "dev": "tsx watch src/bin.ts",
-    "build": "node ./node_modules/.bin/tsc && cp -r src/dashboard/public/. dist/dashboard/public/",
+    "build": "npx tsc && cp -r src/dashboard/public/. dist/dashboard/public/",
     "start": "node dist/bin.js",
-    "typecheck": "node ./node_modules/.bin/tsc --noEmit",
+    "typecheck": "npx tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
