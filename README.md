@@ -77,9 +77,17 @@ Click any screenshot to view full resolution.
 
 ## Prerequisites
 
-- **Node.js** >= 18 (LTS recommended)
+- **Node.js** >= 22.22.2 (required by transitive dependencies)
 - **npm** or **bun** or **pnpm**
 - **OpenCode CLI** installed and configured with a Go subscription (Zen is optional but recommended)
+
+> **npm EACCES error?** If `npm install -g` fails with `permission denied`, configure npm to use a user-writable global prefix:
+> ```bash
+> npm config set prefix ~/.npm-global
+> echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+> source ~/.bashrc
+> ```
+> Then re-run the install. Alternatively, use [nvm](https://github.com/nvm-sh/nvm) which handles this automatically.
 
 ## Installation
 
